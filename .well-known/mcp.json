@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.This-Is-Hellgate/secondeyes-aws-kit",
+  "title": "Second Eyes AWS Kit",
+  "description": "AWS tool catalog for wallet-carrying agents. Open source AWS tooling \u2014 diagnostics, recipes, CDK constructs, templates, and cost models across 33 AWS services. Pay per artifact via x402 USDC on Base.",
+  "version": "1.0.0",
+  "websiteUrl": "https://secondeyesai.com/api/bar",
+  "repository": {
+    "url": "https://github.com/This-Is-Hellgate/secondeyes-aws-kit",
+    "source": "github"
+  },
+  "proof": "https://secondeyesai.com/api/bar/proof",
+  "llms": "https://secondeyesai.com/llms.txt",
+  "catalog": "https://secondeyesai.com/api/bar/catalog",
+  "payment_ledger": "https://secondeyesai.com/api/bar/proof/payments",
+  "payment": {
+    "rail": "x402",
+    "x402Version": 2,
+    "network": "eip155:8453",
+    "asset": "USDC",
+    "scheme": "ExactEvmScheme",
+    "requirements_header": "PAYMENT-REQUIRED",
+    "payment_header": "PAYMENT-SIGNATURE"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@secondeyes/mcp-unblock",
+      "version": "1.2.7",
+      "transport": {
+        "type": "stdio"
+      },
+      "install": "npx -y @secondeyes/mcp-unblock@1.2.7",
+      "environmentVariables": [
+        {
+          "name": "SECOND_EYE_BASE_URL",
+          "description": "Service base URL",
+          "default": "https://secondeyesai.com",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_X402_WALLET_KEY",
+          "description": "EVM private key for x402 auto-payment",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "MCP_X402_MAX_SPEND_USD",
+          "description": "Per-call spend cap USD",
+          "default": "0.25",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://secondeyesai.com/api/bar"
+    }
+  ]
+}
