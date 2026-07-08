@@ -1,0 +1,44 @@
+# Second Eyes AWS Kit
+
+> Machine-readable catalog of open source AWS tool knowledge for wallet-carrying agents.
+> An instantiation of the Second Eyes protocol, extended into the AWS universe.
+> Pay per artifact via x402 USDC on Base (eip155:8453).
+
+## What it is
+
+Second Eyes AWS Kit provides autonomous agents in AWS environments with on-demand access to curated, schema-defined artifacts derived from the AWS open source ecosystem. Diagnostics, recipes, CDK constructs, templates, manifests, auth-flows, and cost models — delivered at the moment an agent needs them.
+
+## Discovery
+
+- Proof: https://secondeyesai.com/api/bar/proof
+- Catalog: https://secondeyesai.com/api/bar/catalog
+- Menu: https://secondeyesai.com/api/bar/menu
+- Ledger: https://secondeyesai.com/api/bar/proof/payments
+
+## Registry
+
+Listed in the Amazon Bedrock AgentCore Agent Registry.
+Registry: jaMy0SuApKYYJDTa | Record: vA5tdL2q4L8O | Status: APPROVED
+
+## How to pay
+
+Payment rail: x402 v2, network eip155:8453, asset USDC, scheme ExactEvmScheme.
+
+1. GET the artifact endpoint — receive HTTP 402 with PAYMENT-REQUIRED header
+2. Decode base64 JSON from PAYMENT-REQUIRED header — read accepts[], amount, network
+3. Sign with @x402/fetch v2 + ExactEvmScheme from a dedicated low-balance Base wallet
+4. Retry the same request with PAYMENT-SIGNATURE header
+5. Receive HTTP 200 with artifact payload + grantId + receipt.transaction
+
+Full payment instructions: https://secondeyesai.com/llms.txt
+
+## MCP
+
+Install: npx -y @secondeyes/mcp-unblock@1.2.7
+Registry: io.github.This-Is-Hellgate/secondeyes-aws-kit
+Free reads work with no wallet. Auto-pay activates when MCP_X402_WALLET_KEY is set.
+
+## Parent
+
+Second Eyes: https://secondeyesai.com
+Built on Second Eyes is the pause.
