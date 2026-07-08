@@ -1,0 +1,117 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Second Eyes AWS Kit",
+    "description": "Machine-readable catalog of open source AWS tool knowledge for wallet-carrying agents. Pay per artifact via x402 USDC on Base. Covers diagnostics, recipes, CDK constructs, templates, and cost models across 33 AWS services.",
+    "version": "1.0.0",
+    "x-audience": "autonomous_agents",
+    "contact": {
+      "url": "https://secondeyesai.com/llms.txt"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://secondeyesai.com"
+    }
+  ],
+  "x-payment": {
+    "rail": "x402",
+    "x402Version": 2,
+    "network": "eip155:8453",
+    "asset": "USDC",
+    "scheme": "ExactEvmScheme",
+    "requirements_header": "PAYMENT-REQUIRED",
+    "payment_header": "PAYMENT-SIGNATURE",
+    "how_to_pay": "https://secondeyesai.com/llms.txt",
+    "ledger": "https://secondeyesai.com/api/bar/proof/payments"
+  },
+  "x-registry": {
+    "aws_bedrock_agentcore": {
+      "registry_id": "jaMy0SuApKYYJDTa",
+      "record_id": "vA5tdL2q4L8O",
+      "status": "APPROVED",
+      "region": "us-east-1"
+    }
+  },
+  "x-discovery": {
+    "proof": "https://secondeyesai.com/api/bar/proof",
+    "catalog": "https://secondeyesai.com/api/bar/catalog",
+    "menu": "https://secondeyesai.com/api/bar/menu",
+    "agent_card": "https://secondeyesai.com/.well-known/agent-card.json",
+    "mcp": "https://secondeyesai.com/.well-known/mcp.json",
+    "llms": "https://secondeyesai.com/llms.txt"
+  },
+  "paths": {
+    "/api/bar/proof": {
+      "get": {
+        "operationId": "proof",
+        "summary": "Verify the service is live and the x402 Base payment rail is active before spending.",
+        "tags": [
+          "discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "Service live confirmation with rail evidence."
+          }
+        }
+      }
+    },
+    "/api/bar/catalog": {
+      "get": {
+        "operationId": "catalog",
+        "summary": "List all available AWS Kit artifacts \u2014 diagnostics, recipes, CDK constructs, templates, manifests, auth-flows, cost models \u2014 with slugs, prices, and service mappings.",
+        "tags": [
+          "discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "Full artifact catalog."
+          }
+        }
+      }
+    },
+    "/api/bar/x402/{slug}": {
+      "get": {
+        "operationId": "get_artifact",
+        "summary": "Retrieve a specific AWS Kit artifact by slug. Returns 402 Payment Required \u2014 pay via x402 USDC on Base, retry with PAYMENT-SIGNATURE header.",
+        "tags": [
+          "paid",
+          "x402"
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Artifact slug from the catalog."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paid artifact delivered."
+          },
+          "402": {
+            "description": "Payment Required \u2014 read PAYMENT-REQUIRED header for x402 accepts[] and pay via USDC on Base."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "discovery",
+      "description": "Free, unpaid discovery surfaces."
+    },
+    {
+      "name": "paid",
+      "description": "x402-gated paid artifact endpoints."
+    },
+    {
+      "name": "x402",
+      "description": "x402 v2 payment-required doors \u2014 USDC on Base."
+    }
+  ]
+}
