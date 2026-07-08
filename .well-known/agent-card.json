@@ -1,0 +1,96 @@
+{
+  "name": "Second Eyes AWS Kit",
+  "description": "AWS tool catalog for wallet-carrying agents. Diagnostics, recipes, CDK constructs, templates, and cost models across 33 AWS services. Open source AWS tooling delivered via x402 USDC on Base.",
+  "url": "https://secondeyesai.com",
+  "version": "1.0.0",
+  "tagline": "Open source AWS tooling for agents that carry wallets.",
+  "provider": {
+    "organization": "Second Eyes",
+    "url": "https://secondeyesai.com"
+  },
+  "supportedInterfaces": [
+    {
+      "url": "https://secondeyesai.com/api/a2a",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "skills": [
+    {
+      "id": "aws-diagnostics",
+      "name": "AWS Diagnostics",
+      "description": "Schema-defined diagnostics for SageMaker, Lambda, Bedrock, DynamoDB failures. Specific to the exact exception class or error condition.",
+      "tags": [
+        "aws",
+        "sagemaker",
+        "lambda",
+        "bedrock",
+        "diagnostic"
+      ]
+    },
+    {
+      "id": "aws-constructs",
+      "name": "AWS CDK Constructs",
+      "description": "Per-service CDK L2 construct references covering 33 AWS services.",
+      "tags": [
+        "aws",
+        "cdk",
+        "infrastructure",
+        "construct"
+      ]
+    },
+    {
+      "id": "aws-recipes",
+      "name": "AWS Recipes",
+      "description": "Step-by-step execution procedures for common AWS agent workflows.",
+      "tags": [
+        "aws",
+        "recipe",
+        "lambda",
+        "bedrock",
+        "agentcore"
+      ]
+    },
+    {
+      "id": "aws-cost-models",
+      "name": "AWS Cost Models",
+      "description": "Actual cost projections for architectural choices \u2014 Lambda vs Fargate, DynamoDB billing modes, Bedrock inference.",
+      "tags": [
+        "aws",
+        "cost",
+        "pricing"
+      ]
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "defaultInputModes": [
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "payment": {
+    "rail": "x402",
+    "x402Version": 2,
+    "network": "eip155:8453",
+    "asset": "USDC",
+    "scheme": "ExactEvmScheme",
+    "how_to_pay": "https://secondeyesai.com/llms.txt",
+    "ledger": "https://secondeyesai.com/api/bar/proof/payments"
+  },
+  "registry": {
+    "aws_bedrock_agentcore": {
+      "registry_id": "jaMy0SuApKYYJDTa",
+      "record_id": "vA5tdL2q4L8O"
+    }
+  },
+  "endpoints": {
+    "proof": "https://secondeyesai.com/api/bar/proof",
+    "catalog": "https://secondeyesai.com/api/bar/catalog",
+    "llms": "https://secondeyesai.com/llms.txt",
+    "mcp": "https://secondeyesai.com/.well-known/mcp.json"
+  }
+}
