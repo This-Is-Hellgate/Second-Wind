@@ -144,6 +144,15 @@ function bazaarExtension(_resource, bazaarOutputSchema) {
             properties: {
               type: { type: "string", const: "http" },
               method: { type: "string", enum: [method] },
+              // x402scan's v2 extractor reads THIS record as the invocation
+              // input schema (schema.properties.input.properties.queryParams).
+              // Empty properties = honestly zero-parameter door; real
+              // descriptors thread through when a door declares queryParams.
+              queryParams: {
+                type: "object",
+                properties:
+                  input.queryParams && typeof input.queryParams === "object" ? input.queryParams : {},
+              },
             },
             required: ["type", "method"],
           },
