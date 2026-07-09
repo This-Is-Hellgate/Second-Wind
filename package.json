@@ -1,0 +1,10 @@
+{
+  "name": "second-wind",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Second Wind — the exact AWS tool an agent needs from GitHub, without downloading all the bullshit. x402 USDC on Base.",
+  "dependencies": {
+    "jose": "^5.9.6"
+  }
+}

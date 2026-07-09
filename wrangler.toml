@@ -1,0 +1,12 @@
+name = "second-wind"
+compatibility_date = "2026-06-01"
+pages_build_output_dir = "public"
+
+[vars]
+X402_PAYTO_PUBLIC = "0xa395b99E69A77479e3882320bea9bFC6972EEc14"
+X402_FACILITATOR_URL = "https://api.cdp.coinbase.com/platform/v2/x402"
+
+[[d1_databases]]
+binding = "SW_DB"
+database_name = "second-wind-catalog"
+database_id = "db6412e2-4c9d-4b82-a93e-3b9f3708245d"

@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+cdp-credentials.local.json
+*.local.json
+.env
+.env.*
