@@ -12,7 +12,7 @@ export async function onRequestGet(context) {
       service: i.service_slug,
       price_usd: i.price_usd,
       summary: i.summary,
-      door: `${CANONICAL_ORIGIN}/api/x402/${i.sku}`,
+      door: `${CANONICAL_ORIGIN}/api/x402/${i.slug}`,
     });
   }
   return new Response(

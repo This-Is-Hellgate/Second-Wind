@@ -19,7 +19,12 @@ export function discoveryJson(obj, extraHeaders = {}) {
 }
 
 function doorPath(item) {
-  return `/api/x402/${item.sku}`;
+  // Advertise the slug, not the SKU: in a marketplace listing the URL is the
+  // headline, and an agent ranking 112 resources matches on the path before
+  // it reads a description. bedrock-agent-action-group-recipe self-describes;
+  // AWS-0563 says nothing. The door handler accepts BOTH (sku OR slug), so
+  // every previously advertised SKU URL keeps working forever.
+  return `/api/x402/${item.slug}`;
 }
 
 function doorGuidance(item) {
