@@ -167,6 +167,25 @@ function bazaarExtension(_resource, bazaarOutputSchema) {
 }
 
 /**
+ * Header-sized bazaar extension: x402scan's v2 parser REQUIRES
+ * extensions.bazaar.info + schema.properties.input in the PAYMENT-REQUIRED
+ * header. The schema (small, always kept) is what the parser validates; a
+ * bulky output example is shed from the header variant when over budget.
+ * The full example still rides the 402 body and the CDP settle echo.
+ */
+const HEADER_BAZAAR_BUDGET_BYTES = 3 * 1024;
+
+function headerSizedBazaarExtension(resource, bazaarOutputSchema) {
+  const full = bazaarExtension(resource, bazaarOutputSchema);
+  if (JSON.stringify(full).length <= HEADER_BAZAAR_BUDGET_BYTES) return full;
+  const slim = JSON.parse(JSON.stringify(full));
+  if (slim.bazaar?.info?.output?.example) {
+    slim.bazaar.info.output = { type: slim.bazaar.info.output.type || "json" };
+  }
+  return slim;
+}
+
+/**
  * Decode a base64 (or base64url) string to a UTF-8 JSON object. Exact inverse of
  * encodePaymentRequiredHeader (UTF-8 -> btoa): atob yields a binary string of bytes,
  * which we widen back to a Uint8Array and decode as UTF-8. Bare JSON.parse(atob(...))
@@ -221,7 +240,14 @@ export function buildProductPaymentRequirements(product, requestUrl, env) {
   // Compact subset that rides the PAYMENT-REQUIRED header so the Coinbase Python
   // x402_action_provider populates discoveryInfo.extensions (it reads only the
   // decoded header). The full set above stays in the 402 body / settle echo.
-  requirements.headerExtensions = headerDiscoveryExtensions(product);
+  // Full bazaar extension (info + input/output schema) MUST ride the header:
+  // x402scan's v2 parser reads extensions.bazaar.schema from the decoded
+  // PAYMENT-REQUIRED header (SCHEMA_INPUT_MISSING / SCHEMA_OUTPUT_MISSING
+  // otherwise). Compact listing identity rides alongside.
+  requirements.headerExtensions = {
+    ...headerSizedBazaarExtension(resource, schema),
+    ...headerDiscoveryExtensions(product),
+  };
 
   return requirements;
 }

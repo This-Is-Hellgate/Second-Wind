@@ -48,8 +48,10 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
         "x-price-usd": item.price_usd,
         "x-payment-info": {
           rail: "x402",
+          protocols: ["x402"],
           x402Version: 2,
           price_usd: item.price_usd,
+          price: { mode: "fixed", currency: "USD", amount: item.price_usd.toFixed(2) },
           asset: "USDC",
           network: "eip155:8453",
           scheme: "ExactEvmScheme",
