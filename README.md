@@ -1,54 +1,38 @@
-# Second Eyes AWS Kit
+# Second Wind
 
-An instantiation of the [Second Eyes](https://secondeyesai.com) protocol, extended into the AWS universe.
+**Agents stall. Second Wind gets them moving.**
 
-Second Eyes AWS Kit is a crossover surface for autonomous agents operating in AWS environments — providing on-demand access to a curated catalog of open source AWS tool knowledge, gated via the [x402 payment protocol](https://x402.org) with USDC settlement on Base.
+Second Wind is an AWS operational-knowledge catalog for autonomous agents that carry wallets — diagnostics, recipes, CDK construct routing, templates, decisions, auth-flows, and cost models across 39 AWS services and language integrations, gated via the [x402 payment protocol](https://x402.org) with USDC settlement on Base.
 
----
+**Status: pre-launch.** The serving surface goes live at **[secondwindai.com](https://secondwindai.com)**.
 
-## What it is
+## What it sells
 
-Autonomous agents working in AWS environments encounter friction. Infrastructure fails, deployments break, services misbehave. Second Eyes AWS Kit gives those agents a payable knowledge surface — specific, actionable, schema-defined content drawn from the AWS open source ecosystem — callable at the exact moment it is needed.
+The map, not the territory. Every item in the catalog points at open-source AWS tooling an agent could find for free — eventually. Second Wind sells knowing *which* of ten thousand repos holds the fix, *what* the fix is distilled to its operational essence, and *why* this construct over that one — priced $0.03–$0.25 USDC, session-less, at the exact moment a stuck agent needs it.
 
-This is not a documentation site. This is a machine-readable catalog for agents that carry wallets.
+An agent mid-failure doesn't browse. It describes its error, pays a nickel, and gets a numbered fix.
 
----
+## How it works
 
-## Protocol
+1. `GET /api/proof` — free liveness check before spending
+2. `GET /api/catalog` — free browse; filter by service or item type
+3. `GET /api/x402/{sku}` — returns `402 Payment Required` with x402 v2 `accepts[]`; sign USDC on Base (ExactEvmScheme) and retry with `PAYMENT-SIGNATURE`
+4. Delivery: distilled knowledge + source pointer + SPDX license + content hash
 
-- **Payment rail:** x402 v2 — USDC on Base (eip155:8453)
-- **Discovery:** AWS Bedrock AgentCore Agent Registry
-- **MCP:** Compatible via `@secondeyes/mcp-unblock`
-- **A2A:** Agent card at `/.well-known/agent-card.json`
-- **OpenAPI:** Machine-readable spec at `/openapi.json`
+Full machine-readable contract: [`openapi.json`](./openapi.json) · Agent card: [`.well-known/agent-card.json`](./.well-known/agent-card.json) · Agent doc: [`llms.txt`](./llms.txt)
 
----
+## Architecture
+
+Cloudflare-first: Pages Functions serve the doors; the catalog is a dedicated D1 database (`second-wind-catalog`) that is the single source of truth — discovery documents and catalog exports are generated from it, never hand-maintained. Second Wind data stays on Second Wind data.
 
 ## Registry
 
-Listed in the **Amazon Bedrock AgentCore Agent Registry** under `secondeyes-aws-kit`. Agents operating in AgentCore environments can discover and invoke this catalog through the registry without additional configuration.
+Listed in the **Amazon Bedrock AgentCore Agent Registry** (registry `jaMy0SuApKYYJDTa`, record `vA5tdL2q4L8O`; record predates the Second Wind rename — update pending).
 
-Registry: `jaMy0SuApKYYJDTa` — Record: `vA5tdL2q4L8O`
+## Provenance & licensing
 
----
-
-## Service
-
-**Endpoint:** https://secondeyesai.com/api/bar  
-**Proof:** https://secondeyesai.com/api/bar/proof  
-**Catalog:** https://secondeyesai.com/api/bar/catalog  
-**Ledger:** https://secondeyesai.com/api/bar/proof/payments
+Catalog items derive from Apache-2.0 and MIT-0 licensed AWS ecosystem projects. Second Wind describes and links; it does not redistribute. Every item carries its source repo, SPDX identifier, and a content hash over exactly what a buyer receives.
 
 ---
 
-## Scope
-
-Open source AWS tooling. Every artifact in this catalog is derived from publicly available AWS repositories — official SDKs, CDK constructs, Lambda Powertools, Bedrock samples, SageMaker tooling, and more. The value is in curation, schema definition, and delivery at the moment an agent needs it.
-
----
-
-## Built on Second Eyes
-
-Second Eyes is the pause. This kit extends that pause into the AWS domain.
-
-https://secondeyesai.com
+A **Second** family entity. Second Wind operates independently with its own domain, catalog database, and settlement wallet.

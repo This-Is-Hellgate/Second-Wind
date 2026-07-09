@@ -1,16 +1,17 @@
 {
-  "name": "Second Eyes AWS Kit",
-  "description": "AWS tool catalog for wallet-carrying agents. Diagnostics, recipes, CDK constructs, templates, and cost models across 33 AWS services. Open source AWS tooling delivered via x402 USDC on Base.",
-  "url": "https://secondeyesai.com",
-  "version": "1.0.0",
-  "tagline": "Open source AWS tooling for agents that carry wallets.",
+  "name": "Second Wind",
+  "description": "AWS operational knowledge catalog for wallet-carrying agents. Diagnostics, recipes, CDK constructs, templates, decisions, auth-flows, and cost models across 39 AWS services and language integrations. Curated open-source AWS tooling knowledge delivered via x402 USDC on Base.",
+  "url": "https://secondwindai.com",
+  "version": "0.1.0",
+  "tagline": "Agents stall. Second Wind gets them moving.",
+  "status": "pre-launch",
   "provider": {
-    "organization": "Second Eyes",
-    "url": "https://secondeyesai.com"
+    "organization": "Second Wind",
+    "url": "https://secondwindai.com"
   },
   "supportedInterfaces": [
     {
-      "url": "https://secondeyesai.com/api/a2a",
+      "url": "https://secondwindai.com/api/a2a",
       "protocolBinding": "HTTP+JSON",
       "protocolVersion": "1.0"
     }
@@ -31,7 +32,7 @@
     {
       "id": "aws-constructs",
       "name": "AWS CDK Constructs",
-      "description": "Per-service CDK L2 construct references covering 33 AWS services.",
+      "description": "Per-service CDK L2 construct references across 39 AWS services.",
       "tags": [
         "aws",
         "cdk",
@@ -78,19 +79,20 @@
     "network": "eip155:8453",
     "asset": "USDC",
     "scheme": "ExactEvmScheme",
-    "how_to_pay": "https://secondeyesai.com/llms.txt",
-    "ledger": "https://secondeyesai.com/api/bar/proof/payments"
+    "how_to_pay": "https://secondwindai.com/llms.txt",
+    "ledger": "https://secondwindai.com/api/proof/payments"
   },
   "registry": {
     "aws_bedrock_agentcore": {
       "registry_id": "jaMy0SuApKYYJDTa",
-      "record_id": "vA5tdL2q4L8O"
+      "record_id": "vA5tdL2q4L8O",
+      "note": "Record predates the Second Wind rename; update pending."
     }
   },
   "endpoints": {
-    "proof": "https://secondeyesai.com/api/bar/proof",
-    "catalog": "https://secondeyesai.com/api/bar/catalog",
-    "llms": "https://secondeyesai.com/llms.txt",
-    "mcp": "https://secondeyesai.com/.well-known/mcp.json"
+    "proof": "https://secondwindai.com/api/proof",
+    "catalog": "https://secondwindai.com/api/catalog",
+    "llms": "https://secondwindai.com/llms.txt",
+    "openapi": "https://secondwindai.com/openapi.json"
   }
 }

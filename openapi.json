@@ -1,100 +1,184 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Second Eyes AWS Kit",
-    "description": "Machine-readable catalog of open source AWS tool knowledge for wallet-carrying agents. Pay per artifact via x402 USDC on Base. Covers diagnostics, recipes, CDK constructs, templates, and cost models across 33 AWS services.",
-    "version": "1.0.0",
+    "title": "Second Wind \u2014 AWS knowledge catalog for autonomous agents",
+    "summary": "Pre-launch API surface. Paid catalog doors deliver curated AWS operational knowledge via x402 (USDC on Base).",
+    "description": "Second Wind sells the map, not the territory: distilled diagnostics, recipes, and construct routing for open-source AWS tooling, priced $0.03\u2013$0.25 USDC per item, session-less via x402 v2. This document describes the launch API; endpoints go live on secondwindai.com.",
+    "version": "0.1.0",
     "x-audience": "autonomous_agents",
+    "x-status": "pre-launch",
     "contact": {
-      "url": "https://secondeyesai.com/llms.txt"
+      "url": "https://secondwindai.com/llms.txt",
+      "email": "info@secondeyesai.com"
     }
   },
   "servers": [
     {
-      "url": "https://secondeyesai.com"
+      "url": "https://secondwindai.com"
     }
   ],
   "x-payment": {
     "rail": "x402",
     "x402Version": 2,
-    "network": "eip155:8453",
     "asset": "USDC",
     "scheme": "ExactEvmScheme",
+    "active_networks": [
+      "eip155:8453"
+    ],
     "requirements_header": "PAYMENT-REQUIRED",
-    "payment_header": "PAYMENT-SIGNATURE",
-    "how_to_pay": "https://secondeyesai.com/llms.txt",
-    "ledger": "https://secondeyesai.com/api/bar/proof/payments"
+    "payment_header": "PAYMENT-SIGNATURE"
   },
-  "x-registry": {
-    "aws_bedrock_agentcore": {
-      "registry_id": "jaMy0SuApKYYJDTa",
-      "record_id": "vA5tdL2q4L8O",
-      "status": "APPROVED",
-      "region": "us-east-1"
+  "components": {
+    "securitySchemes": {
+      "x402Payment": {
+        "type": "http",
+        "scheme": "payment",
+        "description": "x402 v2 payment. First call returns 402 with a PAYMENT-REQUIRED header carrying accepts[]. Sign USDC on Base (eip155:8453) via ExactEvmScheme and retry with the PAYMENT-SIGNATURE header."
+      }
     }
   },
-  "x-discovery": {
-    "proof": "https://secondeyesai.com/api/bar/proof",
-    "catalog": "https://secondeyesai.com/api/bar/catalog",
-    "menu": "https://secondeyesai.com/api/bar/menu",
-    "agent_card": "https://secondeyesai.com/.well-known/agent-card.json",
-    "mcp": "https://secondeyesai.com/.well-known/mcp.json",
-    "llms": "https://secondeyesai.com/llms.txt"
-  },
   "paths": {
-    "/api/bar/proof": {
+    "/api/catalog": {
       "get": {
-        "operationId": "proof",
-        "summary": "Verify the service is live and the x402 Base payment rail is active before spending.",
+        "operationId": "catalog_get",
+        "summary": "Browse the live catalog (free).",
         "tags": [
+          "free",
           "discovery"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional. Filter by canonical service slug, e.g. 'lambda', 'sagemaker', 'ruby'."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool",
+                "construct",
+                "diagnostic",
+                "recipe",
+                "template",
+                "manifest",
+                "decision",
+                "cost-model",
+                "auth-flow"
+              ]
+            },
+            "description": "Optional. Filter by item type."
+          }
         ],
         "responses": {
           "200": {
-            "description": "Service live confirmation with rail evidence."
+            "description": "Live catalog items with sku, slug, price, and one-line lead."
           }
         }
       }
     },
-    "/api/bar/catalog": {
+    "/api/proof": {
       "get": {
-        "operationId": "catalog",
-        "summary": "List all available AWS Kit artifacts \u2014 diagnostics, recipes, CDK constructs, templates, manifests, auth-flows, cost models \u2014 with slugs, prices, and service mappings.",
+        "operationId": "proof_get",
+        "summary": "Self-check \u2014 verify Second Wind is live before paying (free).",
         "tags": [
+          "free",
           "discovery"
         ],
+        "security": [],
         "responses": {
           "200": {
-            "description": "Full artifact catalog."
+            "description": "Liveness and payment-rail posture."
           }
         }
       }
     },
-    "/api/bar/x402/{slug}": {
+    "/api/x402/{sku}": {
       "get": {
-        "operationId": "get_artifact",
-        "summary": "Retrieve a specific AWS Kit artifact by slug. Returns 402 Payment Required \u2014 pay via x402 USDC on Base, retry with PAYMENT-SIGNATURE header.",
+        "operationId": "item_get",
+        "summary": "Buy one catalog item, session-less via x402.",
         "tags": [
           "paid",
           "x402"
         ],
+        "security": [
+          {
+            "x402Payment": []
+          }
+        ],
+        "x-payment-info": {
+          "rail": "x402",
+          "x402Version": 2,
+          "asset": "USDC",
+          "network": "eip155:8453",
+          "scheme": "ExactEvmScheme",
+          "price_usd": "per-item; see /api/catalog"
+        },
         "parameters": [
           {
-            "name": "slug",
+            "name": "sku",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string"
             },
-            "description": "Artifact slug from the catalog."
+            "description": "Catalog item SKU, e.g. 'AWS-0573'."
           }
         ],
         "responses": {
           "200": {
-            "description": "Paid artifact delivered."
+            "description": "Paid delivery: the item's distilled knowledge, source pointer, license, and content hash.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sku": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "The deliverable \u2014 distilled operational knowledge."
+                    },
+                    "source_repo": {
+                      "type": "string"
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "license_spdx": {
+                      "type": "string"
+                    },
+                    "content_hash": {
+                      "type": "string"
+                    },
+                    "access": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sku",
+                    "summary",
+                    "access"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
           },
           "402": {
-            "description": "Payment Required \u2014 read PAYMENT-REQUIRED header for x402 accepts[] and pay via USDC on Base."
+            "description": "Payment Required \u2014 read the PAYMENT-REQUIRED header for the x402 accepts[] and pay via USDC on Base."
           }
         }
       }
@@ -102,16 +186,20 @@
   },
   "tags": [
     {
-      "name": "discovery",
-      "description": "Free, unpaid discovery surfaces."
-    },
-    {
       "name": "paid",
-      "description": "x402-gated paid artifact endpoints."
+      "description": "Session-less x402 paid doors (USDC on Base)."
     },
     {
       "name": "x402",
-      "description": "x402 v2 payment-required doors \u2014 USDC on Base."
+      "description": "x402 v2 payment-required doors."
+    },
+    {
+      "name": "free",
+      "description": "Free, unpaid surfaces."
+    },
+    {
+      "name": "discovery",
+      "description": "Discovery and proof surfaces."
     }
   ]
 }
