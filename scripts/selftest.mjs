@@ -15,6 +15,24 @@ import {
   validateDiscoveryExtension,
   PAYMENT_IDENTIFIER,
 } from "@x402/extensions";
+import Ajv from "ajv";
+import {
+  PaymentRequiredSchema,
+  SettlementResponseSchema,
+  DiscoveryResponseSchema,
+  FacilitatorRequestSchema,
+} from "./spec-schemas.mjs";
+
+// Spec conformance validators — schemas transcribed from the field tables in
+// specs/x402-specification-v2.md. These encode the SPEC, not this codebase:
+// an emitted object that drifts from the spec fails here even when the rest
+// of the suite agrees with it.
+const ajv = new Ajv({ strict: false, allErrors: true });
+const specCheck = (name, schema, value) => {
+  const validate = ajv.compile(schema);
+  const ok = validate(value);
+  check(`SPEC ${name}`, ok, ok ? "" : JSON.stringify(validate.errors?.slice(0, 3)));
+};
 
 const db = new DatabaseSync(":memory:");
 db.exec(`
@@ -216,6 +234,56 @@ check(
   "resources: accepts amount matches price",
   resources.items.every((r2) => Number(r2.accepts[0].amount) === Math.round(r2.metadata.price_usd * 1_000_000))
 );
+
+// 11. SPEC CONFORMANCE — every emitted surface validated against schemas
+// transcribed from x402-specification-v2.md. A flawed product fails here.
+const {
+  buildProductPaymentRequirements,
+  buildFacilitatorRequestBody,
+  successSettlementResponse,
+  failedSettlementResponse,
+  encodePaymentRequiredHeader,
+} = await import("../functions/_lib/x402.js");
+
+// §5.1 — the decoded PAYMENT-REQUIRED header object
+specCheck("§5.1 PaymentRequired (header object)", PaymentRequiredSchema, prBody);
+// §5.1 — the 402 body carries the same protocol fields (plus app data)
+specCheck("§5.1 PaymentRequired (402 body protocol fields)", PaymentRequiredSchema, body402);
+
+// §5.3 — both settlement response shapes, exactly as the endpoint emits them
+specCheck(
+  "§5.3 SettlementResponse (success)",
+  SettlementResponseSchema,
+  successSettlementResponse({ transaction: "0xabc", network: "eip155:8453", payer: "0x1" }, { network: "eip155:8453" })
+);
+specCheck(
+  "§5.3 SettlementResponse (failure)",
+  SettlementResponseSchema,
+  failedSettlementResponse("insufficient_funds", "eip155:8453")
+);
+
+// §7.1 — the exact body we POST to the facilitator's verify/settle
+const reqs = buildProductPaymentRequirements(
+  { kind: "tool", id: "AWS-0571", slug: "dynamodb-throttle-diagnostic", priceUsd: 0.15, description: "test", summary: "test", contentHash: "c3aff7883527f5bd", service: "dynamodb" },
+  "https://secondwindai.com/api/x402/dynamodb-throttle-diagnostic",
+  env
+);
+const syntheticPayload = {
+  x402Version: 2,
+  accepted: reqs.accepts[0],
+  payload: {
+    signature: "0x" + "ab".repeat(65),
+    authorization: { from: "0x" + "1".repeat(40), to: reqs.accepts[0].payTo, value: reqs.accepts[0].amount, validAfter: "0", validBefore: "9999999999", nonce: "0x" + "2".repeat(64) },
+  },
+};
+const facilitatorBody = buildFacilitatorRequestBody(encodePaymentRequiredHeader(syntheticPayload), reqs);
+check("facilitator body builds from synthetic payload", facilitatorBody.ok === true, facilitatorBody.error || "");
+if (facilitatorBody.ok) {
+  specCheck("§7.1 facilitator verify/settle request body", FacilitatorRequestSchema, facilitatorBody.body);
+}
+
+// §8 — the discovery resources document served at /.well-known/x402
+specCheck("§8 discovery resources document", DiscoveryResponseSchema, resources);
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

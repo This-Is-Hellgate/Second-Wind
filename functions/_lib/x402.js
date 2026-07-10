@@ -643,14 +643,19 @@ export async function settleBuiltPayment(builtBody, accept, env) {
 
   return {
     ok: true,
-    receipt: {
-      success: true,
-      transaction: settle.transaction || settle.txHash || "",
-      network: settle.network || accept.network,
-      payer: settle.payer || "",
-    },
+    receipt: successSettlementResponse(settle, accept),
     bazaar,
     extensionResponsesHeader: extensionResponsesHeader || null,
+  };
+}
+
+/** Spec-shaped SettlementResponse for a SUCCESSFUL settlement (§5.3). */
+export function successSettlementResponse(settle, accept) {
+  return {
+    success: true,
+    transaction: settle.transaction || settle.txHash || "",
+    network: settle.network || accept?.network || "eip155:8453",
+    payer: settle.payer || "",
   };
 }
 
