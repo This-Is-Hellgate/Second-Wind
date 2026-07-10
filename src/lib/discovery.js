@@ -1,12 +1,12 @@
 /**
  * Discovery generation — openapi.json, the x402 resources document, and
- * /.well-known/x402 are ALL generated from the KV manifest (inventory.js).
- * One source; surfaces cannot drift: what is in the object store is what is
- * advertised.
+ * /.well-known/x402 are ALL generated from the curated index (curation.js).
+ * One source; surfaces cannot drift: what is curated live is what is
+ * advertised — stubs only on free surfaces, never guidance or the graph.
  */
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { SERVICE_NAME, TAGLINE, CANONICAL_ORIGIN } from "./brand.js";
-import { listTools } from "./inventory.js";
+import { liveStubs, parseMaybeJson } from "./curation.js";
 import { activeNetwork, activePayTo } from "./networks.js";
 
 export function discoveryJson(obj, extraHeaders = {}) {
@@ -25,17 +25,17 @@ function toolPath(stub) {
   return `/api/x402/${stub.slug || stub.sku}`;
 }
 
-/** The bazaar discovery block for one tool — official helper output only. */
+/** The bazaar discovery block for one item — official helper output only. */
 export function toolBazaarExtension(stub) {
-  // Execution tools (Bedrock agents) are POST with a JSON body; the manifest
-  // stub carries the input schema and example the bazaar block advertises.
-  if (stub.store === "bedrock") {
+  // Execution items (Bedrock agents) are POST with a JSON body; the item
+  // carries the input schema and example the bazaar block advertises.
+  if (stub.invoke_kind === "bedrock") {
     return declareDiscoveryExtension({
       type: "http",
       method: "POST",
       bodyType: "json",
-      input: stub.input_example || { input: "describe the task" },
-      inputSchema: stub.input_schema || {
+      input: parseMaybeJson(stub.input_example) || { input: "describe the task" },
+      inputSchema: parseMaybeJson(stub.input_schema) || {
         properties: { input: { type: "string", description: "The task for the agent" }, sessionId: { type: "string" } },
         required: ["input"],
       },
@@ -54,17 +54,21 @@ export function toolBazaarExtension(stub) {
       },
     });
   }
+  // Everything else sells the RESOLVED CAPABILITY: guidance + the wired
+  // composition + invocation instructions — never a raw blob.
   return declareDiscoveryExtension({
     type: "http",
     method: "GET",
     output: {
-      type: stub.store === "r2" ? "binary" : "json",
+      type: "json",
       example: {
         sku: stub.sku,
         name: stub.name,
-        item_type: stub.item_type,
+        kind: stub.kind,
         service: stub.service,
         summary: String(stub.summary || "").slice(0, 200),
+        guidance: "when to reach for this, how to wire it, the gotchas",
+        composition: { steps: [], composes_with: [], requires: [], alternatives: [] },
         content_hash: stub.content_hash,
       },
       schema: {
@@ -72,14 +76,16 @@ export function toolBazaarExtension(stub) {
         properties: {
           sku: { type: "string" },
           name: { type: "string" },
-          item_type: { type: "string" },
+          kind: { type: "string" },
           service: { type: "string" },
           summary: { type: "string" },
-          content: { type: "string" },
+          guidance: { type: "string" },
+          composition: { type: "object" },
+          invoke: { type: "object" },
           source: { type: "object" },
           content_hash: { type: "string" },
         },
-        required: ["sku", "name", "summary", "content_hash"],
+        required: ["sku", "name", "guidance", "composition"],
       },
     },
   });
@@ -98,7 +104,7 @@ function componentSchemas() {
       properties: {
         sku: { type: "string" },
         name: { type: "string" },
-        item_type: { type: "string" },
+        kind: { type: "string" },
         service: { type: "string" },
         price_usd: { type: "number" },
         summary: { type: "string" },
@@ -156,16 +162,33 @@ function componentSchemas() {
       },
       required: ["service", "status"],
     },
-    Deliverable: {
+    ResolvedCapability: {
       type: "object",
-      description: "The paid response for a text tool: the content plus source, license, provenance, and content hash.",
+      description:
+        "The paid response: the resolved, invocable capability — guidance (when/how/why), the composition graph around it (steps, composes_with, requires, alternatives, each with the one-line why), and invocation instructions. Not a file dump.",
       properties: {
         sku: { type: "string" },
         name: { type: "string" },
-        item_type: { type: "string" },
+        kind: { type: "string" },
         service: { type: "string" },
         summary: { type: "string" },
-        content: { type: "string", description: "The tool itself (markdown or JSON)." },
+        guidance: { type: "string", description: "The editorial layer: when to reach for this, wiring, gotchas." },
+        composition: {
+          type: "object",
+          description: "The item's wired graph neighborhood — curation as data.",
+          properties: {
+            steps: { type: "array", items: { type: "object" } },
+            composes_with: { type: "array", items: { type: "object" } },
+            requires: { type: "array", items: { type: "object" } },
+            alternatives: { type: "array", items: { type: "object" } },
+            pairs_with: { type: "array", items: { type: "object" } },
+            part_of: { type: "array", items: { type: "object" } },
+          },
+        },
+        invoke: {
+          type: "object",
+          description: "How to run it — POST body contract for execution items, deliberate artifact fetch for file items.",
+        },
         source: {
           type: "object",
           properties: {
@@ -179,7 +202,7 @@ function componentSchemas() {
         content_hash: { type: "string" },
         version: { type: "integer" },
       },
-      required: ["sku", "name", "summary", "content_hash"],
+      required: ["sku", "name", "guidance", "composition"],
     },
     PaymentRequired402: {
       type: "object",
@@ -240,11 +263,8 @@ function jsonContent(ref) {
 function paidResponses(stub) {
   return {
     200: {
-      description:
-        stub?.store === "r2"
-          ? "Paid. Body is the bundle itself (binary)."
-          : "Paid. Body carries the tool: content, source, license, provenance, and content hash.",
-      content: stub?.store === "r2" ? { "application/octet-stream": { schema: { type: "string", format: "binary" } } } : jsonContent("#/components/schemas/Deliverable"),
+      description: "Paid. Body carries the resolved capability: guidance, composition graph, invocation.",
+      content: jsonContent("#/components/schemas/ResolvedCapability"),
     },
     402: {
       description:
@@ -260,24 +280,24 @@ function paidResponses(stub) {
 }
 
 export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
-  const tools = await listTools(env);
+  const tools = await liveStubs(env);
   const paths = {};
 
   for (const stub of tools) {
-    if (stub.store === "bedrock") {
+    if (stub.invoke_kind === "bedrock") {
       paths[toolPath(stub)] = {
         post: {
           operationId: `${stub.slug || stub.sku}_post`,
           summary: String(stub.summary || "").slice(0, 120),
           description: `${stub.summary} Paid execution endpoint — pay per invocation (USDC via x402), the agent runs, the response returns. Settlement happens only when execution succeeds. ~$${stub.price_usd} USDC.`,
-          tags: ["paid", "x402", "execution", stub.item_type, stub.service].filter(Boolean),
+          tags: ["paid", "x402", "execution", stub.kind, stub.service].filter(Boolean),
           "x-price-usd": stub.price_usd,
           security: [{ x402Payment: [] }],
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: stub.input_schema || {
+                schema: parseMaybeJson(stub.input_schema) || {
                   type: "object",
                   properties: {
                     input: { type: "string", description: "The task for the agent" },
@@ -313,13 +333,34 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
       get: {
         operationId: `${stub.slug || stub.sku}_get`,
         summary: String(stub.summary || "").slice(0, 120),
-        description: `${stub.summary} Session-less x402 paid endpoint — pay once (USDC) and receive the tool. ~$${stub.price_usd} USDC.`,
-        tags: ["paid", "x402", stub.item_type, stub.service].filter(Boolean),
+        description: `${stub.summary} Session-less x402 paid endpoint — pay once (USDC) and receive the resolved capability: guidance, composition, invocation. ~$${stub.price_usd} USDC.`,
+        tags: ["paid", "x402", stub.kind, stub.service].filter(Boolean),
         "x-price-usd": stub.price_usd,
         security: [{ x402Payment: [] }],
         responses: paidResponses(stub),
       },
     };
+    if (stub.invoke_kind === "r2") {
+      // Deliberate, secondary artifact fetch — never the front door.
+      paths[`${toolPath(stub)}/artifact`] = {
+        get: {
+          operationId: `${stub.slug || stub.sku}_artifact_get`,
+          summary: `Artifact for ${stub.name} (deliberate secondary fetch).`,
+          description: `The genuine file artifact behind ${stub.name}. Reached through the resolved capability; same x402 gate.`,
+          tags: ["paid", "x402", "artifact", stub.service].filter(Boolean),
+          "x-price-usd": stub.price_usd,
+          security: [{ x402Payment: [] }],
+          responses: {
+            200: {
+              description: "Paid. Body is the artifact itself (binary).",
+              content: { [stub.mime_type || "application/octet-stream"]: { schema: { type: "string", format: "binary" } } },
+            },
+            402: paidResponses(stub)[402],
+            404: paidResponses(stub)[404],
+          },
+        },
+      };
+    }
   }
 
   paths["/api/x402/{sku}"] = {
@@ -399,7 +440,7 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
  * [PaymentRequirements], lastUpdated, extensions}.
  */
 export async function buildX402Resources(env, origin = CANONICAL_ORIGIN) {
-  const tools = await listTools(env);
+  const tools = await liveStubs(env);
   const payTo = activePayTo(env);
   const net = activeNetwork(env);
 
@@ -423,7 +464,7 @@ export async function buildX402Resources(env, origin = CANONICAL_ORIGIN) {
     metadata: {
       sku: stub.sku,
       slug: stub.slug,
-      item_type: stub.item_type,
+      item_type: stub.kind,
       service: stub.service,
       price_usd: stub.price_usd,
       summary: stub.summary,

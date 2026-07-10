@@ -6,11 +6,11 @@
  * response. AWS executes behind this gate when tools need computation
  * (Bedrock proxy slot, added with the first such tool).
  *
- * Storage model: THE TOOLS ARE OBJECTS. KV holds text tools (markdown/JSON)
- * and the manifest; R2 holds bundles. Publishing = writing the object — the
- * object store is law. D1 is a holding area for intake work plus the
- * operational ledger (payments, deliveries, request log); the serving path
- * never reads tool data from it.
+ * Product model: the deliverable is the RESOLVED, INVOCABLE CAPABILITY plus
+ * the judgment around it — never a file dump. D1 holds the curated index and
+ * the relationship graph (the moat) plus the operational ledger; R2 holds the
+ * occasional genuine artifact, reached only through a resolved response.
+ * Bulk raw access deliberately does not exist.
  *
  * Pages "advanced mode": this file bundles to public/_worker.js (esbuild) and
  * takes over all routing; static assets pass through env.ASSETS.
@@ -29,7 +29,7 @@ import {
 } from "@x402/extensions/payment-identifier";
 
 import { SERVICE_NAME, TAGLINE, CANONICAL_ORIGIN } from "./lib/brand.js";
-import { listTools, countTools, findTool, getGoods } from "./lib/inventory.js";
+import { liveStubs, countLive, findItem, resolveCapability, getArtifact } from "./lib/curation.js";
 import { recordSettledSale, recordDelivery, logRequest } from "./lib/ledger.js";
 import { buildOpenApi, buildX402Resources, discoveryJson, toolBazaarExtension } from "./lib/discovery.js";
 import { buildCdpAuthHeaders, facilitatorPaths } from "./lib/cdp-auth.js";
@@ -37,7 +37,7 @@ import { activeNetwork, activePayTo, activeFacilitatorUrl, isCdpFacilitator } fr
 import { invokeAgent } from "./lib/bedrock.js";
 
 /* ------------------------------------------------------------------ *
- * Payment server — official SDK, constructed per manifest snapshot
+ * Payment server — official SDK, constructed per curated-index snapshot
  * ------------------------------------------------------------------ */
 
 /**
@@ -69,7 +69,7 @@ function facilitatorClient(env) {
   return client;
 }
 
-/** One RouteConfig per live tool, from its manifest stub. */
+/** One RouteConfig per live item, from the curated index. */
 function routeForStub(stub, payTo, network) {
   const url = `${CANONICAL_ORIGIN}/api/x402/${stub.slug || stub.sku}`;
   return {
@@ -82,10 +82,10 @@ function routeForStub(stub, payTo, network) {
       },
     ],
     description: `${stub.name} — ${String(stub.summary || "").slice(0, 140)}`,
-    mimeType: stub.store === "r2" ? stub.mime_type || "application/octet-stream" : "application/json",
+    mimeType: "application/json",
     resource: url,
     serviceName: SERVICE_NAME,
-    tags: [stub.item_type, "aws", "x402"].filter(Boolean).slice(0, 5),
+    tags: [stub.kind, "aws", "x402"].filter(Boolean).slice(0, 5),
     iconUrl: `${CANONICAL_ORIGIN}/favicon.ico`,
     extensions: {
       ...toolBazaarExtension(stub),
@@ -96,13 +96,12 @@ function routeForStub(stub, payTo, network) {
 
 /** Execution tools sell POST; object tools sell GET. */
 function methodForStub(stub) {
-  return stub.store === "bedrock" ? "POST" : "GET";
+  return stub.invoke_kind === "bedrock" ? "POST" : "GET";
 }
 
 /**
- * The payment middleware is rebuilt when the manifest changes; cached per
- * isolate for 60s so route lookups stay cheap without drifting from the
- * object store.
+ * The payment middleware is rebuilt when the curated index changes; cached
+ * per isolate for 60s so route lookups stay cheap without drifting from it.
  */
 const paymentCache = { middleware: null, expires: 0 };
 
@@ -114,13 +113,18 @@ async function getPaymentMiddleware(env) {
   if (!payTo) return null;
 
   const net = activeNetwork(env);
-  const tools = await listTools(env);
+  const tools = await liveStubs(env);
   const routes = {};
   for (const stub of tools) {
     const route = routeForStub(stub, payTo, net.id);
     const method = methodForStub(stub);
     routes[`${method} /api/x402/${stub.slug || stub.sku}`] = route;
     if (stub.slug && stub.sku !== stub.slug) routes[`${method} /api/x402/${stub.sku}`] = route;
+    if (stub.invoke_kind === "r2") {
+      // The deliberate artifact fetch is gated at the same price.
+      routes[`GET /api/x402/${stub.slug || stub.sku}/artifact`] = route;
+      if (stub.slug && stub.sku !== stub.slug) routes[`GET /api/x402/${stub.sku}/artifact`] = route;
+    }
   }
   if (Object.keys(routes).length === 0) {
     paymentCache.middleware = "empty";
@@ -217,8 +221,8 @@ app.get("/api/proof", async (c) => {
   let liveCount = null;
   let inventoryOk = false;
   try {
-    liveCount = await countTools(c.env);
-    inventoryOk = Boolean(c.env.SW_KV);
+    liveCount = await countLive(c.env);
+    inventoryOk = Boolean(c.env.SW_DB);
   } catch {
     inventoryOk = false;
   }
@@ -249,7 +253,7 @@ app.get("/api/proof", async (c) => {
 
 // Free: the tools listing.
 app.get("/api/tools", async (c) => {
-  const tools = await listTools(c.env);
+  const tools = await liveStubs(c.env);
   return c.json(
     {
       service: SERVICE_NAME,
@@ -259,7 +263,7 @@ app.get("/api/tools", async (c) => {
       tools: tools.map((t) => ({
         sku: t.sku,
         name: t.name,
-        item_type: t.item_type,
+        kind: t.kind,
         service: t.service,
         price_usd: t.price_usd,
         summary: t.summary,
@@ -271,7 +275,7 @@ app.get("/api/tools", async (c) => {
   );
 });
 
-// Free: generated discovery documents (one source: the KV manifest).
+// Free: generated discovery documents (one source: the curated index).
 app.get("/openapi.json", async (c) => discoveryJson(await buildOpenApi(c.env, new URL(c.req.url).origin)));
 app.get("/v2/x402/discovery/resources", async (c) => discoveryJson(await buildX402Resources(c.env, new URL(c.req.url).origin)));
 app.get("/.well-known/x402", async (c) => discoveryJson(await buildX402Resources(c.env, new URL(c.req.url).origin)));
@@ -281,7 +285,7 @@ app.get("/.well-known/x402", async (c) => discoveryJson(await buildX402Resources
 app.use("/api/x402/*", async (c, next) => {
   const middleware = await getPaymentMiddleware(c.env);
   if (!middleware) return c.json({ error: "payment_rail_not_configured" }, 503, JSON_HEADERS);
-  if (middleware === "empty") return next(); // no live tools: handler 404s below
+  if (middleware === "empty") return next(); // no live items: handler 404s below
   return middleware(c, next);
 });
 
@@ -289,12 +293,12 @@ app.use("/api/x402/*", async (c, next) => {
 // failed invocation returns >= 400, so the SDK cancels settlement and the
 // buyer is never charged for a failed run.
 app.post("/api/x402/:key", async (c) => {
-  const stub = await findTool(c.env, c.req.param("key"));
-  if (!stub) {
+  const item = await findItem(c.env, c.req.param("key"));
+  if (!item) {
     return c.json({ error: "unknown_sku", tools: "/api/tools" }, 404, JSON_HEADERS);
   }
-  if (stub.store !== "bedrock") {
-    return c.json({ error: "method_not_allowed", hint: `This tool is GET: GET /api/x402/${stub.slug || stub.sku}` }, 405, JSON_HEADERS);
+  if (item.invoke_kind !== "bedrock") {
+    return c.json({ error: "method_not_allowed", hint: `This item resolves: GET /api/x402/${item.slug || item.sku}` }, 405, JSON_HEADERS);
   }
   let body = {};
   try {
@@ -305,51 +309,46 @@ app.post("/api/x402/:key", async (c) => {
   if (!body.input || typeof body.input !== "string") {
     return c.json({ error: "missing_input", hint: '"input" (string) is required' }, 400, JSON_HEADERS);
   }
-  const run = await invokeAgent(c.env, stub.key, { input: body.input, sessionId: body.sessionId });
+  const run = await invokeAgent(c.env, item.invoke_key, { input: body.input, sessionId: body.sessionId });
   if (!run.ok) {
-    return c.json({ error: run.error, sku: stub.sku }, run.status, JSON_HEADERS);
+    return c.json({ error: run.error, sku: item.sku }, run.status, JSON_HEADERS);
   }
-  return c.json({ sku: stub.sku, completion: run.completion, sessionId: run.sessionId }, 200, JSON_HEADERS);
+  return c.json({ sku: item.sku, completion: run.completion, sessionId: run.sessionId }, 200, JSON_HEADERS);
 });
 
+// Deliberate, secondary artifact fetch — reached through the resolved
+// capability, same x402 gate. Never the front door.
+app.get("/api/x402/:key/artifact", async (c) => {
+  const item = await findItem(c.env, c.req.param("key"));
+  if (!item || item.invoke_kind !== "r2") {
+    return c.json({ error: "unknown_artifact", tools: "/api/tools" }, 404, JSON_HEADERS);
+  }
+  const object = await getArtifact(c.env, item);
+  if (!object) {
+    // Curated item whose artifact is missing — never charge for it: a 5xx
+    // makes the SDK cancel settlement (verified, not settled).
+    return c.json({ error: "artifact_missing", sku: item.sku }, 503, JSON_HEADERS);
+  }
+  return c.body(object.body, 200, {
+    ...JSON_HEADERS,
+    "Content-Type": item.mime_type || object.httpMetadata?.contentType || "application/octet-stream",
+    "Content-Disposition": `attachment; filename="${item.slug || item.sku}"`,
+    "X-Content-Hash": item.content_hash || "",
+  });
+});
+
+// The paid deliverable: the RESOLVED CAPABILITY — guidance (the voice),
+// composition (the wired graph neighborhood), invocation. Not a file dump.
 app.get("/api/x402/:key", async (c) => {
-  const stub = await findTool(c.env, c.req.param("key"));
-  if (!stub) {
+  const item = await findItem(c.env, c.req.param("key"));
+  if (!item) {
     return c.json({ error: "unknown_sku", tools: "/api/tools" }, 404, JSON_HEADERS);
   }
-  if (stub.store === "bedrock") {
-    return c.json({ error: "method_not_allowed", hint: `This tool executes: POST /api/x402/${stub.slug || stub.sku} with a JSON body { "input": "the task" }` }, 405, JSON_HEADERS);
+  if (item.invoke_kind === "bedrock") {
+    return c.json({ error: "method_not_allowed", hint: `This item executes: POST /api/x402/${item.slug || item.sku} with a JSON body { "input": "the task" }` }, 405, JSON_HEADERS);
   }
-  const goods = await getGoods(c.env, stub);
-  if (!goods) {
-    // Manifest names a tool whose object is missing — never charge for it:
-    // a 5xx here makes the SDK cancel settlement (verified, not settled).
-    return c.json({ error: "tool_object_missing", sku: stub.sku }, 503, JSON_HEADERS);
-  }
-  if (goods.object) {
-    // R2 bundle — binary delivery.
-    return c.body(goods.object.body, 200, {
-      ...JSON_HEADERS,
-      "Content-Type": stub.mime_type || goods.object.httpMetadata?.contentType || "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${stub.slug || stub.sku}"`,
-      "X-Content-Hash": stub.content_hash || "",
-    });
-  }
-  return c.json(
-    {
-      sku: stub.sku,
-      name: stub.name,
-      item_type: stub.item_type,
-      service: stub.service,
-      summary: stub.summary,
-      content: goods.content,
-      source: stub.source || {},
-      content_hash: stub.content_hash,
-      version: stub.version ?? 1,
-    },
-    200,
-    JSON_HEADERS
-  );
+  const resolved = await resolveCapability(c.env, item, new URL(c.req.url).origin);
+  return c.json(resolved, 200, JSON_HEADERS);
 });
 
 // Teaching 405 for wrong methods on known surfaces.

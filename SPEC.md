@@ -21,13 +21,21 @@ from the live D1 rows (60-second isolate cache); the CDP facilitator authenticat
 `createAuthHeaders` (CDP JWT). Hand-rolled payment code no longer serves payments — it survives
 only inside the discovery-document generators pending their port.
 
-Storage: **the tools ARE objects.** **KV** holds text tools (markdown/JSON) at `tool:<sku>` plus
-the `manifest` key — the single machine-readable index every surface (payment routes, the tools
-listing, openapi.json, the discovery documents) is generated from. **R2** holds bundles (zips,
-scripts, binaries), delivered as binary responses. Publishing a tool means writing its object and
-its manifest stub — **the object store is law**. **D1** is nothing more than a holding area for
-intake work plus the operational ledger (payments, deliveries, request log); the serving path
-never reads tool data from it. **AWS (Bedrock)** executes behind the paywall when a tool requires
+**Product model: a curated, opinionated service — not a repository.** The deliverable is the
+**resolved, invocable capability plus the judgment around it**: guidance (the editorial voice),
+the composition graph (how items fit together, each edge carrying its one-line WHY), and
+invocation instructions. The raw files are an implementation detail. x402 gates **invocation and
+guidance**, never bulk download — if the paid response were a zip, this would be a paywalled
+GitHub, which is the failure mode this section exists to prevent.
+
+Storage serves that model: **D1 holds the curated index and the relationship graph
+(`items` + `edges`, migrations/0001_curation.sql) — the graph is the moat, first-class data, not
+a README** — plus the operational ledger. The catalog is intentionally small; D1 alone carries
+it (KV can return later as a read cache if latency ever demands). **R2** holds the occasional
+genuine artifact (zips, scripts), reached only through a resolved response at a deliberate
+`/artifact` sub-path behind the same x402 gate — secondary, never the front door. **Free
+surfaces carry stubs only**; the self-test fails structurally if guidance or graph data ever
+leaks onto a free surface. **AWS (Bedrock)** executes behind the paywall when an item requires
 computation; Cloudflare verifies, proxies, settles after success.
 
 **Network is config, not a constant.** The first proof runs **Base Sepolia (`eip155:84532`)**
@@ -119,11 +127,13 @@ This table is updated in place as steps complete.
 2. **Nothing rides the wire unless a downstream role consumes it.** Protocol surfaces carry
    spec-defined fields only; guidance for humans and agents lives in application data (the 402
    body) and documentation.
-3. **The object store is law after publish.** Drafts and intake work live in the D1 holding
-   area; writing a tool's object (KV/R2) and its manifest stub is the act of publishing. Live
-   changes are deliberate object writes with a version bump and new content hash. What is IN the
-   store is what is for sale — nothing else.
-4. **No production store writes (KV, R2, or D1) without Mike's explicit approval.** None.
+3. **The curated index is law after publish.** Writing an item (status `live`) and its edges to
+   the curation tables is the act of publishing; live changes are deliberate writes with a
+   version bump and new content hash. What is curated live is what is for sale — nothing else.
+4. **No production store writes (D1, KV, or R2) without Mike's explicit approval.** None.
+8. **Curation never leaks free.** Free surfaces carry stubs only — no guidance, no graph. The
+   opinionated, resolved, framed path is the default; raw artifact access is secondary and
+   deliberate. The self-test enforces this structurally.
 5. **Price ceiling: $1.00 USDC per tool.** A tool is a small task — one specific thing an agent
    fails at, with the short content that unblocks it.
 6. **Plain names only.** No metaphor vocabulary on any agent-facing surface. The selftest greps
