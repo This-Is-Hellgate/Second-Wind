@@ -1,7 +1,7 @@
 /**
- * Second Wind store — the ONLY reader of the second-wind-catalog D1 database
- * (binding: SW_DB). Every surface (catalog, doors, openapi, x402 resources)
- * is generated from these queries, so surfaces cannot drift from the shelf.
+ * Second Wind store — the ONLY reader of the D1 database (binding: SW_DB).
+ * Every surface (tools listing, paid endpoints, openapi, x402 resources) is
+ * generated from these queries, so surfaces cannot drift from the database.
  * Only status='live' rows are ever sold or discoverable.
  */
 

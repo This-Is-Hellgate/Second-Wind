@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
       {
         service: SERVICE_NAME,
         status: dbOk ? "live" : "degraded",
-        catalog_items_live: liveCount,
+        tools_live: liveCount,
         payment: {
           rail: "x402",
           x402Version: 2,
@@ -27,7 +27,7 @@ export async function onRequestGet(context) {
           facilitator_configured: Boolean(env.X402_FACILITATOR_URL),
         },
         discovery: {
-          catalog: `${CANONICAL_ORIGIN}/api/catalog`,
+          tools: `${CANONICAL_ORIGIN}/api/tools`,
           openapi: `${CANONICAL_ORIGIN}/openapi.json`,
           x402_resources: `${CANONICAL_ORIGIN}/v2/x402/discovery/resources`,
           well_known: `${CANONICAL_ORIGIN}/.well-known/x402`,

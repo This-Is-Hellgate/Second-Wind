@@ -1,9 +1,10 @@
 /**
- * Second Wind paid door — GET /api/x402/{sku}.
+ * Second Wind paid endpoint — GET /api/x402/{sku}.
  * 402 until paid; on a valid PAYMENT-SIGNATURE: verify -> record (structural
- * idempotency) -> settle -> deliver the coordinate. A retried signed payment
- * hits the UNIQUE idempotency index and is re-delivered free — the database
- * itself refuses a second charge.
+ * idempotency) -> settle -> deliver. A retried signed payment hits the UNIQUE
+ * idempotency index and is re-delivered free — the database itself refuses a
+ * second charge. A payment whose settlement previously FAILED may retry
+ * settlement under its original record (never a second charge).
  */
 import {
   buildProductPaymentRequirements,
@@ -13,7 +14,13 @@ import {
   verifyPaymentHeader,
   settleBuiltPayment,
   usdToUsdcMicros,
+  parsePaymentPayloadFromHeader,
+  paymentResponseHeaders,
+  failedSettlementResponse,
 } from "../../_lib/x402.js";
+// Official helper: reads extensions["payment-identifier"].info.id (validated)
+// from the client's PaymentPayload per specs/extensions/payment_identifier.md.
+import { extractPaymentIdentifier } from "@x402/extensions/payment-identifier";
 import { liveItemBySku, recordVerifiedPayment, markSettled, markFailed, recordDelivery } from "../../_lib/store.js";
 
 function json(obj, status = 200, extra = {}) {
@@ -58,7 +65,7 @@ export async function onRequestGet(context) {
   const { env, request, params } = context;
   const item = await liveItemBySku(env, params.sku);
   if (!item) {
-    return json({ error: "unknown_sku", catalog: "/api/catalog" }, 404);
+    return json({ error: "unknown_sku", tools: "/api/tools" }, 404);
   }
 
   const product = {
@@ -67,6 +74,9 @@ export async function onRequestGet(context) {
     slug: item.slug,
     priceUsd: item.price_usd,
     description: `${item.name} — ${item.summary.slice(0, 140)}`,
+    summary: item.summary,
+    contentHash: item.content_hash,
+    service: item.service_slug,
   };
   const requirements = buildProductPaymentRequirements(product, request.url, env);
   if (!requirements) {
@@ -86,8 +96,13 @@ export async function onRequestGet(context) {
   }
 
   // Structural double-charge guard: one row per signed payment, enforced by
-  // the UNIQUE partial index on payments.idempotency_key.
+  // the UNIQUE partial index on payments.idempotency_key. Key priority per
+  // specs/extensions/payment_identifier.md: client id from the PaymentPayload
+  // extension (scoped by sku so the same id on another resource cannot
+  // collide), then the Idempotency-Key header, then a digest of the signature.
+  const clientPaymentId = extractPaymentIdentifier(parsePaymentPayloadFromHeader(paymentHeader) || {});
   const idemKey =
+    (clientPaymentId ? `${item.sku}:${clientPaymentId}` : null) ||
     request.headers.get("Idempotency-Key") ||
     (await (async () => {
       const data = new TextEncoder().encode(paymentHeader);
@@ -103,29 +118,47 @@ export async function onRequestGet(context) {
     amount_usdc_micros: String(usdToUsdcMicros(item.price_usd)),
     payer: verified.built?.paymentPayload?.payload?.authorization?.from || "",
     network: verified.accept?.network || "eip155:8453",
-    scheme: verified.accept?.scheme || "ExactEvmScheme",
+    scheme: verified.accept?.scheme || "exact",
     idempotency_key: idemKey,
   });
 
+  let settlePaymentId = paymentId;
   if (!rec.inserted) {
     if (rec.existing?.status === "settled") {
+      const receipt = {
+        success: true,
+        transaction: rec.existing.tx_hash || "",
+        network: verified.accept?.network || "eip155:8453",
+        payer: verified.built?.paymentPayload?.payload?.authorization?.from || "",
+      };
       return json(
-        { ...deliverable(item, { transaction: rec.existing.tx_hash, note: "already_settled_no_second_charge" }), redelivery: true },
-        200
+        { ...deliverable(item, { ...receipt, note: "already_settled_no_second_charge" }), redelivery: true },
+        200,
+        paymentResponseHeaders(receipt)
       );
     }
-    return json({ error: "payment_in_progress", note: "This signed payment is being processed. Do not re-sign; retry shortly." }, 409);
+    if (rec.existing?.status !== "failed") {
+      return json({ error: "payment_in_progress", note: "This signed payment is being processed. Do not re-sign; retry shortly." }, 409);
+    }
+    // Previous settlement attempt failed — retry settlement under the ORIGINAL
+    // payment record so the guard still sees exactly one row for this payment.
+    settlePaymentId = rec.existing.id;
   }
 
   const settled = await settleBuiltPayment(verified.built, verified.accept, env);
   if (!settled.ok) {
-    await markFailed(env, paymentId, settled.error);
+    await markFailed(env, settlePaymentId, settled.error);
     const body = payment402BodyForProduct(requirements, product, settled.error || "Payment settlement failed.", undefined, request.url);
-    return json(body, 402, payment402Headers(requirements, settled.error));
+    // Per the v2 flow the settlement outcome rides PAYMENT-RESPONSE on failure
+    // too — official SDK clients read paymentStatus (settle_failed) from it.
+    return json(body, 402, {
+      ...payment402Headers(requirements, settled.error),
+      ...paymentResponseHeaders(failedSettlementResponse(settled.error, verified.accept?.network)),
+    });
   }
 
-  await markSettled(env, paymentId, settled.receipt?.transaction, settled.bazaar ? "bazaar" : "");
-  await recordDelivery(env, paymentId, item.sku, item.content_hash);
+  await markSettled(env, settlePaymentId, settled.receipt?.transaction, settled.bazaar ? "bazaar" : "");
+  await recordDelivery(env, settlePaymentId, item.sku, item.content_hash);
 
-  return json(deliverable(item, settled.receipt), 200);
+  return json(deliverable(item, settled.receipt), 200, paymentResponseHeaders(settled.receipt));
 }

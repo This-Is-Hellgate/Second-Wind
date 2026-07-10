@@ -1,32 +1,30 @@
 # Second Wind
 
-> AWS operational knowledge for autonomous agents, payable per item via x402 (USDC on Base).
-> Status: pre-launch — serving surface goes live at https://secondwindai.com
+> Small, specific AWS tools for autonomous agents, payable per call via x402 (USDC on Base).
+> Status: pre-launch — inventory is being curated; the serving surface is live at https://secondwindai.com
 
 ## What this is
 
-Second Wind sells distilled AWS operational knowledge to wallet-carrying agents: diagnostics keyed to exact exception classes, step-by-step recipes, CDK construct routing, architectural decisions, and cost models — across 39 AWS services and language integrations (including Ruby: Lambda runtime, aws-sdk-ruby, SAM deployment).
-
-Every item points at open-source tooling. The product is the map: which repo, what fix, why this one — $0.03–$0.25 USDC, session-less, delivered the moment a stuck agent needs it.
+Second Wind sells small, specific AWS tools to wallet-carrying agents: exact source coordinates plus the operational knowledge to use them, distilled from AWS open-source repositories. Each tool solves one small task, priced at $1.00 USDC or less, session-less, delivered the moment an agent needs it.
 
 ## HOW TO PAY (x402 v2)
 
 1. GET https://secondwindai.com/api/proof — free; confirm live before spending
-2. GET https://secondwindai.com/api/catalog — free; browse, filter by ?service= or ?type=
-3. GET https://secondwindai.com/api/x402/{sku} — returns 402; read the PAYMENT-REQUIRED header for accepts[]
-4. Sign USDC on Base (eip155:8453, ExactEvmScheme); retry the same request with PAYMENT-SIGNATURE
-5. Receive: summary (the deliverable), source_repo, source_url, license_spdx, content_hash
+2. GET https://secondwindai.com/api/tools — free; browse every live tool with its price
+3. GET https://secondwindai.com/api/x402/{sku} — returns 402; the PAYMENT-REQUIRED header carries base64 JSON payment requirements (accepts[])
+4. Sign USDC on Base (eip155:8453, exact scheme — @x402/fetch or @x402/axios handle this); retry the same request with PAYMENT-SIGNATURE
+5. Receive: the tool content, source repo, license (SPDX), content hash, and settlement receipt
 
-Idempotent: same request, same answer on every retry. Optional headers: X-Agent-Id, Idempotency-Key.
+Idempotent: same request, same answer on every retry. A retried signed payment is never charged twice — re-delivery is free. Optional: payment-identifier extension (extensions["payment-identifier"].info.id in your PaymentPayload) or an Idempotency-Key header.
 
 ## Discovery
 
-- OpenAPI: https://secondwindai.com/openapi.json
+- OpenAPI (every endpoint, full schemas): https://secondwindai.com/openapi.json
 - Agent card: https://secondwindai.com/.well-known/agent-card.json
-- x402 manifest: https://secondwindai.com/.well-known/x402
+- x402 resources: https://secondwindai.com/.well-known/x402
 
 ## Provenance
 
-Items derive from Apache-2.0 / MIT-0 AWS ecosystem projects; Second Wind describes and links, never redistributes. Each delivery carries its SPDX license and a content hash over exactly what you received.
+Tools derive from Apache-2.0 / MIT-0 AWS ecosystem projects; Second Wind describes and links, never redistributes. Each delivery carries its SPDX license and a content hash over exactly what you received.
 
-Second Wind is a Second family entity and operates independently: its own domain, catalog database, and settlement wallet.
+Second Wind is a Second family entity and operates independently: its own domain, database, and settlement wallet.

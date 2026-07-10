@@ -59,7 +59,7 @@ export function x402ConfigWarnings(env) {
   if (!env) return [];
   const warnings = [];
   if (!canonicalBasePayTo(env)) {
-    warnings.push({ code: "no_payto", message: "X402_PAYTO_PUBLIC is not set — every paid door will return payment_rail_not_configured." });
+    warnings.push({ code: "no_payto", message: "X402_PAYTO_PUBLIC is not set — every paid endpoint will return payment_rail_not_configured." });
   }
   if (!env.X402_FACILITATOR_URL) {
     warnings.push({ code: "no_facilitator", message: "X402_FACILITATOR_URL is not set — payments cannot verify or settle." });

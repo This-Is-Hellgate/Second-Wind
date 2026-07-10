@@ -1,65 +1,23 @@
 {
   "name": "Second Wind",
-  "description": "AWS operational knowledge catalog for wallet-carrying agents. Diagnostics, recipes, CDK constructs, templates, decisions, auth-flows, and cost models across 39 AWS services and language integrations. Curated open-source AWS tooling knowledge delivered via x402 USDC on Base.",
+  "description": "Small, specific AWS tools for wallet-carrying agents: exact source coordinates plus the operational knowledge to use them, distilled from AWS open-source repositories. Each tool solves one small task, priced at $1.00 USDC or less, delivered via x402 (USDC on Base).",
   "url": "https://secondwindai.com",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "tagline": "Agents stall. Second Wind gets them moving.",
   "status": "pre-launch",
   "provider": {
     "organization": "Second Wind",
     "url": "https://secondwindai.com"
   },
-  "supportedInterfaces": [
-    {
-      "url": "https://secondwindai.com/api/a2a",
-      "protocolBinding": "HTTP+JSON",
-      "protocolVersion": "1.0"
-    }
-  ],
   "skills": [
     {
-      "id": "aws-diagnostics",
-      "name": "AWS Diagnostics",
-      "description": "Schema-defined diagnostics for SageMaker, Lambda, Bedrock, DynamoDB failures. Specific to the exact exception class or error condition.",
+      "id": "aws-tools",
+      "name": "AWS Tools",
+      "description": "Small, task-specific AWS tools curated from AWS open-source repositories. Inventory is being curated; browse the live listing at /api/tools.",
       "tags": [
         "aws",
-        "sagemaker",
-        "lambda",
-        "bedrock",
-        "diagnostic"
-      ]
-    },
-    {
-      "id": "aws-constructs",
-      "name": "AWS CDK Constructs",
-      "description": "Per-service CDK L2 construct references across 39 AWS services.",
-      "tags": [
-        "aws",
-        "cdk",
-        "infrastructure",
-        "construct"
-      ]
-    },
-    {
-      "id": "aws-recipes",
-      "name": "AWS Recipes",
-      "description": "Step-by-step execution procedures for common AWS agent workflows.",
-      "tags": [
-        "aws",
-        "recipe",
-        "lambda",
-        "bedrock",
-        "agentcore"
-      ]
-    },
-    {
-      "id": "aws-cost-models",
-      "name": "AWS Cost Models",
-      "description": "Actual cost projections for architectural choices \u2014 Lambda vs Fargate, DynamoDB billing modes, Bedrock inference.",
-      "tags": [
-        "aws",
-        "cost",
-        "pricing"
+        "tools",
+        "x402"
       ]
     }
   ],
@@ -78,9 +36,8 @@
     "x402Version": 2,
     "network": "eip155:8453",
     "asset": "USDC",
-    "scheme": "ExactEvmScheme",
-    "how_to_pay": "https://secondwindai.com/llms.txt",
-    "ledger": "https://secondwindai.com/api/proof/payments"
+    "scheme": "exact",
+    "how_to_pay": "https://secondwindai.com/llms.txt"
   },
   "registry": {
     "aws_bedrock_agentcore": {
@@ -91,7 +48,7 @@
   },
   "endpoints": {
     "proof": "https://secondwindai.com/api/proof",
-    "catalog": "https://secondwindai.com/api/catalog",
+    "tools": "https://secondwindai.com/api/tools",
     "llms": "https://secondwindai.com/llms.txt",
     "openapi": "https://secondwindai.com/openapi.json"
   }

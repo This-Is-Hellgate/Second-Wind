@@ -7,36 +7,34 @@ import {
   fetchWithTimeout,
 } from "./resilience.js";
 import { buildCdpAuthHeaders, facilitatorPaths } from "./cdp-auth.js";
-import { CANONICAL_HOST } from "./brand.js";
+import { CANONICAL_HOST, CANONICAL_ORIGIN, SERVICE_NAME } from "./brand.js";
 import {
   resolveActiveNetworks,
   buildAcceptEntry,
   selectAcceptForPayload,
   payloadNetwork,
 } from "./x402-networks.js";
-import { allExtensions, headerDiscoveryExtensions } from "./x402-extensions.js";
+// Official x402 Foundation helpers — the docs warn that hand-rolled
+// extensions.bazaar fails discovery verification silently, so the wire shapes
+// come from @x402/extensions, never from local reimplementations. Subpath
+// imports keep the SIWX chunk (Node-builtin heavy) out of the Workers bundle.
+import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
+import {
+  declarePaymentIdentifierExtension,
+  PAYMENT_IDENTIFIER,
+} from "@x402/extensions/payment-identifier";
 
 const x402Circuit = () => getCircuit("x402_facilitator", { failureThreshold: 5, openMs: 30_000 });
 
-export const X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1";
-
 /**
- * MCP autopay client identity advertised inside every unpaid 402 body so a
- * walletless caller receives exact, machine-actionable setup instructions.
- * NOTE: version is duplicated from packages/secondeye-mcp/package.json until the
- * canonical service catalog + discovery generator (Phase 2/3) owns it — the
- * discovery:check drift gate must compare these two values.
- */
-/**
- * Cheapest routable first purchase, advertised in every 402 so an undecided
- * agent has a $0.03 on-ramp instead of walking away. Cheapest live catalog
- * tier; the catalog endpoint itself is free.
+ * Free first step advertised in every 402 so an undecided agent has somewhere
+ * to go instead of walking away: the free tools listing with prices.
  */
 const CHEAPEST_FIRST_STEP = {
-  name: "catalog",
+  name: "tools",
   price_usd: 0,
-  path: "/api/catalog",
-  why: "Free full catalog with prices. Cheapest paid items are $0.03.",
+  path: "/api/tools",
+  why: "Free listing of every live tool with its price.",
 };
 
 /**
@@ -100,79 +98,53 @@ function buildAccepts(amount, env) {
   return rails.map((rail) => buildAcceptEntry(rail, amount));
 }
 
-/** Synthesize a minimal Bazaar schema so every paid product is discoverable. */
-function defaultBazaarSchema(product) {
+/** Bazaar output example so an indexer can show what a paid call returns. */
+function defaultBazaarOutput(product) {
   return {
-    input: { type: "http", method: "GET", discoverable: true },
-    output: {
-      service: product.slug || product.id,
-      access: "granted",
-      scope: product.kind,
-      paid_usd: product.priceUsd,
-      note: "Paid survival service. Embed work_stamp in your deliverable.",
-    },
+    sku: product.id,
+    name: product.slug || product.id,
+    item_type: product.kind,
+    service: product.service || "",
+    summary: String(product.summary || product.description || "").slice(0, 200),
+    content_hash: product.contentHash || "",
   };
 }
 
-/** Absolute, canonical resource URL — CDP Bazaar catalogs by callable URL, not path. */
+/** Absolute, canonical resource URL — CDP Bazaar indexes by callable URL, not path. */
 function canonicalResource(requestUrl) {
   const { pathname } = new URL(requestUrl);
   return `https://${CANONICAL_HOST}${pathname}`;
 }
 
-/** Matches @x402/extensions createQueryDiscoveryExtension() { info, schema } wire shape. */
-function bazaarExtension(_resource, bazaarOutputSchema) {
-  const { input, output } = bazaarOutputSchema;
-  const method = (input.method || "GET").toUpperCase();
-
-  return {
-    bazaar: {
-      info: {
-        input: {
-          type: "http",
-          method,
-          ...(input.headerFields ? { headers: input.headerFields } : {}),
-        },
-        ...(output ? { output: { type: "json", example: output } } : {}),
-      },
+/**
+ * Bazaar discovery extension via the OFFICIAL @x402/extensions helper — the
+ * docs warn hand-rolled bazaar blocks fail discovery verification silently.
+ * Every paid endpoint is a zero-parameter GET; output carries both an example
+ * and a JSON Schema of the paid response shape.
+ */
+function bazaarExtension(_resource, product) {
+  return declareDiscoveryExtension({
+    type: "http",
+    method: "GET",
+    output: {
+      type: "json",
+      example: defaultBazaarOutput(product),
       schema: {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
-          input: {
-            type: "object",
-            properties: {
-              type: { type: "string", const: "http" },
-              method: { type: "string", enum: [method] },
-              // x402scan's v2 extractor reads THIS record as the invocation
-              // input schema (schema.properties.input.properties.queryParams).
-              // Empty properties = honestly zero-parameter door; real
-              // descriptors thread through when a door declares queryParams.
-              queryParams: {
-                type: "object",
-                properties:
-                  input.queryParams && typeof input.queryParams === "object" ? input.queryParams : {},
-              },
-            },
-            required: ["type", "method"],
-          },
-          ...(output
-            ? {
-                output: {
-                  type: "object",
-                  properties: {
-                    type: { type: "string" },
-                    example: { type: "object" },
-                  },
-                  required: ["type"],
-                },
-              }
-            : {}),
+          sku: { type: "string" },
+          name: { type: "string" },
+          item_type: { type: "string" },
+          service: { type: "string" },
+          summary: { type: "string" },
+          source: { type: "object" },
+          content_hash: { type: "string" },
+          receipt: { type: ["object", "null"] },
         },
-        required: ["input"],
+        required: ["sku", "name", "summary", "content_hash"],
       },
     },
-  };
+  });
 }
 
 /**
@@ -184,8 +156,8 @@ function bazaarExtension(_resource, bazaarOutputSchema) {
  */
 const HEADER_BAZAAR_BUDGET_BYTES = 3 * 1024;
 
-function headerSizedBazaarExtension(resource, bazaarOutputSchema) {
-  const full = bazaarExtension(resource, bazaarOutputSchema);
+function headerSizedBazaarExtension(resource, product) {
+  const full = bazaarExtension(resource, product);
   if (JSON.stringify(full).length <= HEADER_BAZAAR_BUDGET_BYTES) return full;
   const slim = JSON.parse(JSON.stringify(full));
   if (slim.bazaar?.info?.output?.example) {
@@ -239,23 +211,24 @@ export function buildProductPaymentRequirements(product, requestUrl, env) {
     mimeType: "application/json",
     maxAmountRequired: amount,
     accepts,
+    tags: [product.kind, "aws", "x402"].filter(Boolean),
   };
 
-  const schema = product.bazaarOutputSchema || defaultBazaarSchema(product);
+  // Only spec-defined extensions ride the wire, built by the official helpers:
+  // bazaar (discovery) and payment-identifier (client idempotency, optional).
+  const paymentIdentifier = { [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(false) };
   requirements.extensions = {
-    ...bazaarExtension(resource, schema),
-    ...allExtensions(product),
+    ...bazaarExtension(resource, product),
+    ...paymentIdentifier,
   };
-  // Compact subset that rides the PAYMENT-REQUIRED header so the Coinbase Python
-  // x402_action_provider populates discoveryInfo.extensions (it reads only the
-  // decoded header). The full set above stays in the 402 body / settle echo.
-  // Full bazaar extension (info + input/output schema) MUST ride the header:
+  // The PAYMENT-REQUIRED header carries the same extensions, size-capped:
   // x402scan's v2 parser reads extensions.bazaar.schema from the decoded
-  // PAYMENT-REQUIRED header (SCHEMA_INPUT_MISSING / SCHEMA_OUTPUT_MISSING
-  // otherwise). Compact listing identity rides alongside.
+  // header (SCHEMA_INPUT_MISSING / SCHEMA_OUTPUT_MISSING otherwise), and the
+  // Coinbase Python x402_action_provider populates discoveryInfo only from the
+  // decoded header. A bulky output example is shed when over budget.
   requirements.headerExtensions = {
-    ...headerSizedBazaarExtension(resource, schema),
-    ...headerDiscoveryExtensions(product),
+    ...headerSizedBazaarExtension(resource, product),
+    ...paymentIdentifier,
   };
 
   return requirements;
@@ -266,7 +239,11 @@ export function payment402BodyForProduct(requirements, product, error, origin, r
   return {
     x402Version: 2,
     error: error || "Payment required",
-    resource: requirements.resource,
+    // v2 PaymentRequired carries resource as a ResourceInfo OBJECT (url,
+    // description, mimeType, serviceName, iconUrl) — see schemes/overview in
+    // the x402 docs. Top-level description/mimeType stay for clients that read
+    // them there (Coinbase Python provider).
+    resource: resourceObject(requirements),
     description: requirements.description,
     mimeType: requirements.mimeType,
     maxAmountRequired: requirements.maxAmountRequired,
@@ -283,23 +260,12 @@ export function payment402BodyForProduct(requirements, product, error, origin, r
       do_not_serve_degraded_paid_content: true,
       retry: "exponential_backoff_with_jitter",
       max_retries: 3,
-      free_samples: {
-        tool: `${base}/api/bar/tools/cursor-mcp-wiring`,
-        tap: `${base}/api/bar/taps/cursor-mcp-minimal-config`,
-      },
-      catalog: `${base}/api/bar/catalog`,
     },
-    lounge: {
-      index: "/api/bar",
-      laws: "/api/bar/laws",
-      pricing: "/api/bar/pricing",
-      enter: "/api/bar/enter",
-      leave: "/api/bar/leave",
-      receipt: "/api/bar/receipt",
-      catalog: "/api/bar/catalog",
-      proof: "/api/bar/proof",
-      stats: "/api/bar/stats",
-      bar_tab: "/api/access/purchase?plan=annual",
+    links: {
+      tools: `${base || CANONICAL_ORIGIN}/api/tools`,
+      proof: `${base || CANONICAL_ORIGIN}/api/proof`,
+      openapi: `${base || CANONICAL_ORIGIN}/openapi.json`,
+      llms: `${base || CANONICAL_ORIGIN}/llms.txt`,
     },
   };
 }
@@ -346,6 +312,14 @@ function resourceObject(requirements, { truncate } = { truncate: false }) {
     url: resourceUrl,
     description: truncate ? shortHeaderDescription(description) : description,
     mimeType: requirements.mimeType || "application/json",
+    // Optional ResourceInfo fields per the v2 core spec: serviceName ≤ 32
+    // printable ASCII, tags ≤ 5 × ≤ 32 printable ASCII, iconUrl absolute
+    // http(s). Facilitators soft-drop invalid fields.
+    serviceName: SERVICE_NAME,
+    ...(Array.isArray(requirements.tags) && requirements.tags.length
+      ? { tags: requirements.tags.slice(0, 5).map((t) => String(t).slice(0, 32)) }
+      : {}),
+    iconUrl: `${CANONICAL_ORIGIN}/favicon.ico`,
   };
 }
 
@@ -518,7 +492,7 @@ function logVerifyFailure(fields) {
   }
 }
 
-/** Verify a payment header against requirements without settling (for validate-before-settle doors). */
+/** Verify a payment header against requirements without settling. */
 export async function verifyPaymentHeader(paymentHeader, requirement, env) {
   const facilitator = env.X402_FACILITATOR_URL;
   if (!facilitator) {
@@ -680,21 +654,31 @@ export async function settleBuiltPayment(builtBody, accept, env) {
 }
 
 export function encodePaymentResponse(receipt) {
-  return btoa(JSON.stringify(receipt));
+  return encodePaymentRequiredHeader(receipt);
 }
 
 /**
  * The v2 settlement-confirmation headers. The x402 v2 HTTP spec names the response
- * header PAYMENT-RESPONSE (base64 settlement confirmation); legacy CDP/agentkit
+ * header PAYMENT-RESPONSE (base64 SettlementResponse); legacy CDP/agentkit
  * clients read X-PAYMENT-RESPONSE. Emit BOTH so a strict v2 client and an existing
- * client both find the receipt. Spread onto any post-settlement 200.
+ * client both find it. Per the v2 flow this header rides success (200) AND
+ * settlement failure (402) — official SDK clients read paymentStatus from it.
  */
-export function paymentResponseHeaders(receipt) {
-  const encoded = encodePaymentResponse(receipt);
+export function paymentResponseHeaders(settlementResponse) {
+  const encoded = encodePaymentResponse(settlementResponse);
   return {
     "PAYMENT-RESPONSE": encoded,
     "X-PAYMENT-RESPONSE": encoded,
-    "Access-Control-Expose-Headers":
-      "PAYMENT-RESPONSE, X-PAYMENT-RESPONSE, X-Second-Eye-Mark, X-Second-Eye-Patron, X-Second-Eye-Session, X-Second-Eye-Verify",
+    "Access-Control-Expose-Headers": "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE",
+  };
+}
+
+/** Spec-shaped SettlementResponse for a FAILED settlement (rides the 402). */
+export function failedSettlementResponse(errorReason, network) {
+  return {
+    success: false,
+    errorReason: String(errorReason || "settlement_failed").slice(0, 200),
+    transaction: "",
+    network: network || "eip155:8453",
   };
 }

@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Second Wind — the exact AWS tool an agent needs from GitHub, without downloading all the bullshit. x402 USDC on Base.",
   "dependencies": {
+    "@x402/extensions": "^2.17.0",
     "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@x402/core": "^2.17.0",
+    "@x402/fetch": "^2.17.0"
   }
 }
