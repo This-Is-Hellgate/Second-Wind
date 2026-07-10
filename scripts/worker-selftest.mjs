@@ -32,23 +32,23 @@ CREATE TABLE request_log (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT, sku T
 const GUIDANCE_MARKER = "GUIDANCE-ONLY-BEHIND-THE-PAYWALL";
 db.exec(`
 INSERT INTO items (sku, slug, name, kind, service, summary, guidance, price_usd, invoke_kind, invoke_key, input_schema, input_example, mime_type, source_repo, source_url, license_spdx, provenance, content_hash, status) VALUES
- ('AWS-0571','dynamodb-throttle-diagnostic','dynamodb-throttle-diagnostic','tool','dynamodb',
+ ('AWS-0571','dynamodb-throttle-diagnostic','writes throttled on one key','tool','dynamodb',
   'ProvisionedThroughputExceededException: switch billing, shard hot keys, backoff with jitter.',
   '${GUIDANCE_MARKER}: Reach for this when writes spike on one partition key. Wire the CloudWatch alarm first; the gotcha is that on-demand switching takes effect per-table, not per-index.',
   0.15,'resolve','','','','','awslabs/amazon-dynamodb-tools','https://github.com/awslabs/amazon-dynamodb-tools','Apache-2.0','upstream','c3aff7883527f5bd','live'),
- ('AWS-0572','dynamodb-hot-key-sharder','dynamodb-hot-key-sharder','tool','dynamodb',
+ ('AWS-0572','dynamodb-hot-key-sharder','one partition takes all writes','tool','dynamodb',
   'Write-sharding pattern for hot partition keys.',
   'Use AFTER the throttle diagnostic confirms a hot key. Prefix-shard by tenant, never randomly.',
   0.20,'resolve','','','','','awslabs/amazon-dynamodb-tools','https://github.com/awslabs','Apache-2.0','upstream','dd22dd22dd22dd22','live'),
- ('AWS-0900','dynamo-rescue-workflow','dynamo-rescue-workflow','workflow','dynamodb',
+ ('AWS-0900','dynamo-rescue-workflow','my table is throttled','workflow','dynamodb',
   'The full remediation path for a throttled DynamoDB table, wired in order.',
   'Run the steps in order; skip step 2 only if the diagnostic shows uniform load.',
   0.60,'resolve','','','','','','','','synthesized','ee33ee33ee33ee33','live'),
- ('AWS-1001','lambda-rescue-agent','lambda-rescue-agent','agent','lambda',
+ ('AWS-1001','lambda-rescue-agent','my lambda loops forever','agent','lambda',
   'Bedrock agent that diagnoses and remediates runaway Lambda execution loops.',
   'Give it the function name and the symptom; it reads the logs itself.',
   0.05,'bedrock','AGENT12345/ALIAS1','{"properties":{"input":{"type":"string","description":"The task for the agent"},"sessionId":{"type":"string"}},"required":["input"]}','{"input":"my lambda is stuck in a retry loop"}','','','','','synthesized','aa11aa11aa11aa11','live'),
- ('AWS-0999','lambda-rescue-bundle','lambda-rescue-bundle','artifact','lambda',
+ ('AWS-0999','lambda-rescue-bundle','scripts to stop loops','artifact','lambda',
   'Zipped remediation scripts for runaway Lambda execution loops.',
   'The scripts assume Python 3.12 runtimes; read RUNBOOK.md inside first.',
   0.95,'r2','bundle:AWS-0999','','','application/zip','aws/aws-lambda-tools','https://github.com/aws','Apache-2.0','upstream','beefbeefbeefbeef','live'),
@@ -123,6 +123,8 @@ const toolsRaw = JSON.stringify(toolsBody);
 check("tools: 200 with all live items", tools.status === 200 && toolsBody.total_live === 5);
 check("tools: workflow + agent + artifact listed", toolsRaw.includes("dynamo-rescue-workflow") && toolsRaw.includes("lambda-rescue-agent") && toolsRaw.includes("lambda-rescue-bundle"));
 check("tools: draft invisible", !toolsRaw.includes("held-draft"));
+// Names are symptom hooks: <= 5 words, agent-relatable, never a slug echo.
+check("GUARD: names are 4-5 word symptom hooks, not slugs", toolsBody.tools.every((t) => t.name !== t.sku && !t.name.includes("-") && t.name.split(" ").length >= 3 && t.name.split(" ").length <= 5), JSON.stringify(toolsBody.tools.map((t) => t.name)));
 // THE GUARD: curation is the product — the free surface never carries it.
 check("GUARD: no guidance on the free listing", !toolsRaw.includes(GUIDANCE_MARKER) && !toolsRaw.includes("guidance"));
 check("GUARD: no graph on the free listing", !toolsRaw.includes("composition") && !toolsRaw.includes("composes_with"));

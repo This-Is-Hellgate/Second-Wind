@@ -134,6 +134,11 @@ This table is updated in place as steps complete.
 8. **Curation never leaks free.** Free surfaces carry stubs only — no guidance, no graph. The
    opinionated, resolved, framed path is the default; raw artifact access is secondary and
    deliberate. The self-test enforces this structurally.
+9. **Names are symptoms, not taxonomy.** The buyer is a stuck agent scanning a list; it does not
+   care which AWS product is involved. An item's `name` is the failure in the agent's own words,
+   4–5 plain words ("deploy refuses to update export", "my lambda loops forever"); the `slug`
+   carries the technical taxonomy underneath. The self-test enforces the shape: 3–5 words, no
+   hyphens, never a slug echo.
 5. **Price ceiling: $1.00 USDC per tool.** A tool is a small task — one specific thing an agent
    fails at, with the short content that unblocks it.
 6. **Plain names only.** No metaphor vocabulary on any agent-facing surface. The selftest greps
