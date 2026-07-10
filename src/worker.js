@@ -1,10 +1,16 @@
 /**
  * Second Wind gatekeeper — Hono on Cloudflare Workers running the OFFICIAL
  * x402 SDK (@x402/hono + @x402/core + @x402/evm). Cloudflare verifies payment
- * at the edge; the handler serves the goods (KV object, D1 record fallback);
- * the middleware settles ONLY after the handler succeeds — a buyer is never
- * charged for a failed response. AWS executes behind this gate when tools
- * need computation (Bedrock proxy slot, added with the first such tool).
+ * at the edge; the handler serves the goods; the middleware settles ONLY
+ * after the handler succeeds — a buyer is never charged for a failed
+ * response. AWS executes behind this gate when tools need computation
+ * (Bedrock proxy slot, added with the first such tool).
+ *
+ * Storage model: THE TOOLS ARE OBJECTS. KV holds text tools (markdown/JSON)
+ * and the manifest; R2 holds bundles. Publishing = writing the object — the
+ * object store is law. D1 is a holding area for intake work plus the
+ * operational ledger (payments, deliveries, request log); the serving path
+ * never reads tool data from it.
  *
  * Pages "advanced mode": this file bundles to public/_worker.js (esbuild) and
  * takes over all routing; static assets pass through env.ASSETS.
@@ -17,21 +23,21 @@ import {
 } from "@x402/hono";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
-import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   declarePaymentIdentifierExtension,
   PAYMENT_IDENTIFIER,
 } from "@x402/extensions/payment-identifier";
 
-import { SERVICE_NAME, TAGLINE, CANONICAL_ORIGIN } from "../functions/_lib/brand.js";
-import { liveItems, liveItemBySku, recordVerifiedPayment, markSettled, recordDelivery, logRequest, countLive } from "../functions/_lib/store.js";
-import { buildOpenApi, buildX402Resources, discoveryJson } from "../functions/_lib/discovery.js";
-import { buildCdpAuthHeaders, facilitatorPaths } from "../functions/_lib/cdp-auth.js";
+import { SERVICE_NAME, TAGLINE, CANONICAL_ORIGIN } from "./lib/brand.js";
+import { listTools, countTools, findTool, getGoods } from "./lib/inventory.js";
+import { recordSettledSale, recordDelivery, logRequest } from "./lib/ledger.js";
+import { buildOpenApi, buildX402Resources, discoveryJson, toolBazaarExtension } from "./lib/discovery.js";
+import { buildCdpAuthHeaders, facilitatorPaths } from "./lib/cdp-auth.js";
 
 const NETWORK = "eip155:8453"; // Base mainnet only, by design
 
 /* ------------------------------------------------------------------ *
- * Payment server — official SDK, constructed per catalog snapshot
+ * Payment server — official SDK, constructed per manifest snapshot
  * ------------------------------------------------------------------ */
 
 /**
@@ -57,78 +63,51 @@ function facilitatorClient(env) {
   return client;
 }
 
-/** One RouteConfig per live tool, keyed by BOTH slug and sku paths. */
-function routeForItem(item, payTo) {
-  const url = `${CANONICAL_ORIGIN}/api/x402/${item.slug}`;
+/** One RouteConfig per live tool, from its manifest stub. */
+function routeForStub(stub, payTo) {
+  const url = `${CANONICAL_ORIGIN}/api/x402/${stub.slug || stub.sku}`;
   return {
     accepts: [
       {
         scheme: "exact",
         network: NETWORK,
         payTo,
-        price: `$${item.price_usd.toFixed(2)}`,
+        price: `$${Number(stub.price_usd).toFixed(2)}`,
       },
     ],
-    description: `${item.name} — ${item.summary.slice(0, 140)}`,
-    mimeType: "application/json",
+    description: `${stub.name} — ${String(stub.summary || "").slice(0, 140)}`,
+    mimeType: stub.store === "r2" ? stub.mime_type || "application/octet-stream" : "application/json",
     resource: url,
     serviceName: SERVICE_NAME,
-    tags: [item.item_type, "aws", "x402"].slice(0, 5),
+    tags: [stub.item_type, "aws", "x402"].filter(Boolean).slice(0, 5),
     iconUrl: `${CANONICAL_ORIGIN}/favicon.ico`,
     extensions: {
-      ...declareDiscoveryExtension({
-        type: "http",
-        method: "GET",
-        output: {
-          type: "json",
-          example: {
-            sku: item.sku,
-            name: item.name,
-            item_type: item.item_type,
-            service: item.service_slug,
-            summary: item.summary.slice(0, 200),
-            content_hash: item.content_hash,
-          },
-          schema: {
-            type: "object",
-            properties: {
-              sku: { type: "string" },
-              name: { type: "string" },
-              item_type: { type: "string" },
-              service: { type: "string" },
-              summary: { type: "string" },
-              content: { type: "string" },
-              source: { type: "object" },
-              content_hash: { type: "string" },
-            },
-            required: ["sku", "name", "summary", "content_hash"],
-          },
-        },
-      }),
+      ...toolBazaarExtension(stub),
       [PAYMENT_IDENTIFIER]: declarePaymentIdentifierExtension(false),
     },
   };
 }
 
 /**
- * The payment middleware is rebuilt when the live catalog changes; cached per
- * isolate for 60s so route lookups stay cheap without drifting from D1.
+ * The payment middleware is rebuilt when the manifest changes; cached per
+ * isolate for 60s so route lookups stay cheap without drifting from the
+ * object store.
  */
-const paymentCache = { middleware: null, expires: 0, count: -1 };
+const paymentCache = { middleware: null, expires: 0 };
 
 async function getPaymentMiddleware(env) {
   const now = Date.now();
   if (paymentCache.middleware && now < paymentCache.expires) return paymentCache.middleware;
 
-  const items = await liveItems(env);
   const payTo = env.X402_PAYTO || env.X402_PAYTO_PUBLIC;
   if (!payTo) return null;
 
+  const tools = await listTools(env);
   const routes = {};
-  for (const item of items) {
-    const route = routeForItem(item, payTo);
-    routes[`GET /api/x402/${item.slug}`] = route;
-    if (item.sku !== item.slug) routes[`GET /api/x402/${item.sku}`] = route;
+  for (const stub of tools) {
+    const route = routeForStub(stub, payTo);
+    routes[`GET /api/x402/${stub.slug || stub.sku}`] = route;
+    if (stub.slug && stub.sku !== stub.slug) routes[`GET /api/x402/${stub.sku}`] = route;
   }
   if (Object.keys(routes).length === 0) {
     paymentCache.middleware = "empty";
@@ -144,7 +123,7 @@ async function getPaymentMiddleware(env) {
       try {
         const paymentId = `pay_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
         const sku = skuFromResourceUrl(context.paymentPayload?.resource?.url) || "";
-        await recordVerifiedPayment(env, {
+        await recordSettledSale(env, {
           id: paymentId,
           sku,
           price_usd: Number(context.requirements?.amount || 0) / 1_000_000,
@@ -153,8 +132,8 @@ async function getPaymentMiddleware(env) {
           network: context.requirements?.network || NETWORK,
           scheme: context.requirements?.scheme || "exact",
           idempotency_key: `settle:${context.result?.transaction || crypto.randomUUID()}`,
+          tx_hash: context.result?.transaction || "",
         });
-        await markSettled(env, paymentId, context.result?.transaction || "", "sdk");
         await recordDelivery(env, paymentId, sku, "");
       } catch (err) {
         console.log(JSON.stringify({ event: "ledger_write_failed", error: String(err?.message || err) }));
@@ -166,7 +145,6 @@ async function getPaymentMiddleware(env) {
   // kinds (with CDP auth) on the first payment-relevant request.
   paymentCache.middleware = paymentMiddlewareFromHTTPServer(httpServer);
   paymentCache.expires = now + 60_000;
-  paymentCache.count = items.length;
   return paymentCache.middleware;
 }
 
@@ -224,17 +202,17 @@ app.options("/api/*", (c) =>
 // Free: liveness proof.
 app.get("/api/proof", async (c) => {
   let liveCount = null;
-  let dbOk = false;
+  let inventoryOk = false;
   try {
-    liveCount = await countLive(c.env);
-    dbOk = true;
+    liveCount = await countTools(c.env);
+    inventoryOk = Boolean(c.env.SW_KV);
   } catch {
-    dbOk = false;
+    inventoryOk = false;
   }
   return c.json(
     {
       service: SERVICE_NAME,
-      status: dbOk ? "live" : "degraded",
+      status: inventoryOk ? "live" : "degraded",
       tools_live: liveCount,
       payment: {
         rail: "x402",
@@ -258,21 +236,21 @@ app.get("/api/proof", async (c) => {
 
 // Free: the tools listing.
 app.get("/api/tools", async (c) => {
-  const items = await liveItems(c.env);
+  const tools = await listTools(c.env);
   return c.json(
     {
       service: SERVICE_NAME,
       tagline: TAGLINE,
-      total_live: items.length,
+      total_live: tools.length,
       payment: { rail: "x402", network: NETWORK, asset: "USDC", how: "GET any tool URL -> 402 -> sign -> retry with PAYMENT-SIGNATURE" },
-      tools: items.map((i) => ({
-        sku: i.sku,
-        name: i.name,
-        item_type: i.item_type,
-        service: i.service_slug,
-        price_usd: i.price_usd,
-        summary: i.summary,
-        url: `${CANONICAL_ORIGIN}/api/x402/${i.slug}`,
+      tools: tools.map((t) => ({
+        sku: t.sku,
+        name: t.name,
+        item_type: t.item_type,
+        service: t.service,
+        price_usd: t.price_usd,
+        summary: t.summary,
+        url: `${CANONICAL_ORIGIN}/api/x402/${t.slug || t.sku}`,
       })),
     },
     200,
@@ -280,7 +258,7 @@ app.get("/api/tools", async (c) => {
   );
 });
 
-// Free: generated discovery documents (one source: the live D1 rows).
+// Free: generated discovery documents (one source: the KV manifest).
 app.get("/openapi.json", async (c) => discoveryJson(await buildOpenApi(c.env, new URL(c.req.url).origin)));
 app.get("/v2/x402/discovery/resources", async (c) => discoveryJson(await buildX402Resources(c.env, new URL(c.req.url).origin)));
 app.get("/.well-known/x402", async (c) => discoveryJson(await buildX402Resources(c.env, new URL(c.req.url).origin)));
@@ -295,34 +273,36 @@ app.use("/api/x402/*", async (c, next) => {
 });
 
 app.get("/api/x402/:key", async (c) => {
-  const item = await liveItemBySku(c.env, c.req.param("key"));
-  if (!item) {
+  const stub = await findTool(c.env, c.req.param("key"));
+  if (!stub) {
     return c.json({ error: "unknown_sku", tools: "/api/tools" }, 404, JSON_HEADERS);
   }
-  // The goods: KV object when stocked (markdown/JSON), D1 record always.
-  let content = null;
-  try {
-    content = (await c.env.SW_KV?.get?.(`tool:${item.sku}`)) ?? null;
-  } catch {
-    content = null;
+  const goods = await getGoods(c.env, stub);
+  if (!goods) {
+    // Manifest names a tool whose object is missing — never charge for it:
+    // a 5xx here makes the SDK cancel settlement (verified, not settled).
+    return c.json({ error: "tool_object_missing", sku: stub.sku }, 503, JSON_HEADERS);
+  }
+  if (goods.object) {
+    // R2 bundle — binary delivery.
+    return c.body(goods.object.body, 200, {
+      ...JSON_HEADERS,
+      "Content-Type": stub.mime_type || goods.object.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${stub.slug || stub.sku}"`,
+      "X-Content-Hash": stub.content_hash || "",
+    });
   }
   return c.json(
     {
-      sku: item.sku,
-      name: item.name,
-      item_type: item.item_type,
-      service: item.service_slug,
-      summary: item.summary,
-      ...(content ? { content } : {}),
-      source: {
-        repo: item.source_repo,
-        path: item.source_path,
-        url: item.source_url,
-        license_spdx: item.license_spdx,
-        provenance: item.provenance,
-      },
-      content_hash: item.content_hash,
-      version: item.version,
+      sku: stub.sku,
+      name: stub.name,
+      item_type: stub.item_type,
+      service: stub.service,
+      summary: stub.summary,
+      content: goods.content,
+      source: stub.source || {},
+      content_hash: stub.content_hash,
+      version: stub.version ?? 1,
     },
     200,
     JSON_HEADERS

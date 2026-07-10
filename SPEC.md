@@ -21,10 +21,14 @@ from the live D1 rows (60-second isolate cache); the CDP facilitator authenticat
 `createAuthHeaders` (CDP JWT). Hand-rolled payment code no longer serves payments — it survives
 only inside the discovery-document generators pending their port.
 
-Storage: **D1** holds the records (tools, payments ledger, deliveries, request log). **KV** holds
-the goods (tool content: markdown/JSON) — `content` is delivered from KV when stocked. **R2** is
-reserved for downloadable bundles. **AWS (Bedrock)** executes behind the paywall when a tool
-requires computation; Cloudflare verifies, proxies, settles after success.
+Storage: **the tools ARE objects.** **KV** holds text tools (markdown/JSON) at `tool:<sku>` plus
+the `manifest` key — the single machine-readable index every surface (payment routes, the tools
+listing, openapi.json, the discovery documents) is generated from. **R2** holds bundles (zips,
+scripts, binaries), delivered as binary responses. Publishing a tool means writing its object and
+its manifest stub — **the object store is law**. **D1** is nothing more than a holding area for
+intake work plus the operational ledger (payments, deliveries, request log); the serving path
+never reads tool data from it. **AWS (Bedrock)** executes behind the paywall when a tool requires
+computation; Cloudflare verifies, proxies, settles after success.
 
 The legacy `functions/` handlers remain in-repo until the gatekeeper's production cutover is
 proven (`_worker.js` takes precedence on Pages; the old code is inert once deployed).
@@ -80,7 +84,7 @@ This table is updated in place as steps complete.
 | --- | --- | --- | --- | --- |
 | 1 | Ship the gatekeeper | Push the commits; CI runs both conformance suites, builds the worker, auto-deploys secondwindai.com (official-SDK serving replaces the hand-rolled core in production) | Production `/api/proof` returns the new shape; `/api/catalog` 308s to `/api/tools`; production `/.well-known/x402` validates against the §8 schema; production `/openapi.json` carries `components.schemas`; official `@x402/fetch` decodes a production 402 emitted by the SDK middleware | **Ready — awaiting explicit deploy approval** |
 | 2 | First repo intake | Mike sends an AWS repo; tool candidates drafted — each a small task an agent fails at: sku, price ≤ $1.00 USDC, summary, source repo/path, SPDX license, content hash | Every draft passes field validation (price cap, license, completeness); Mike has approved or rejected each candidate individually; at least one approved tool exists | Blocked on Step 1 + first repo |
-| 3 | First publish | With Mike's explicit go — the only database write — approved tools written to production D1. The database is law from that moment | `/api/proof` count equals approved count exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved | Blocked on Step 2 |
+| 3 | First publish | With Mike's explicit go — approved tools written as OBJECTS: KV (text) / R2 (bundles) plus their manifest stubs. The object store is law from that moment. (Also creates the KV namespace / R2 bucket bindings, Mike-gated infra) | `/api/proof` count equals the manifest exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved; each object fetches and matches its content hash | Blocked on Step 2 |
 | 4 | Prove one real sale | Canary purchase with Mike's wallet via the official client | 200 with `PAYMENT-RESPONSE` decoding to a success SettlementResponse; transaction confirmed on Base; payments + deliveries rows written; a retried signed payment re-delivers free; a failed settlement shows `settle_failed` and permits retry | Blocked on Step 3 |
 | 5 | Get discovered | Confirm CDP catalogs the resources (`EXTENSION-RESPONSES` bazaar status `success`; presence in CDP `/discovery/resources`); submit to x402scan and ecosystem registries | Resource visible in at least one facilitator discovery index with no schema rejections; x402scan lists without extraction errors | Blocked on Step 4 |
 | 6 | Scale intake | Repo after repo, each batch through the Step 2 → 3 gates | Same gates as Steps 2–3, every batch | Ongoing after Step 5 |
@@ -95,10 +99,11 @@ This table is updated in place as steps complete.
 2. **Nothing rides the wire unless a downstream role consumes it.** Protocol surfaces carry
    spec-defined fields only; guidance for humans and agents lives in application data (the 402
    body) and documentation.
-3. **The database is law after publish.** Files and drafts prepare a change; writing it to
-   production D1 is the act of publishing; live changes are deliberate database updates with a
-   version bump and new content hash.
-4. **No production database writes without Mike's explicit approval.** None.
+3. **The object store is law after publish.** Drafts and intake work live in the D1 holding
+   area; writing a tool's object (KV/R2) and its manifest stub is the act of publishing. Live
+   changes are deliberate object writes with a version bump and new content hash. What is IN the
+   store is what is for sale — nothing else.
+4. **No production store writes (KV, R2, or D1) without Mike's explicit approval.** None.
 5. **Price ceiling: $1.00 USDC per tool.** A tool is a small task — one specific thing an agent
    fails at, with the short content that unblocks it.
 6. **Plain names only.** No metaphor vocabulary on any agent-facing surface. The selftest greps
