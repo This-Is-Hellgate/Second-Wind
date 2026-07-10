@@ -5,6 +5,8 @@
  */
 import { CANONICAL_ORIGIN, SERVICE_NAME, TAGLINE } from "./brand.js";
 import { liveItems } from "./store.js";
+import { bazaarExtension, usdToUsdcMicros } from "./x402.js";
+import { resolveActiveNetworks, buildAcceptEntry } from "./x402-networks.js";
 
 export function discoveryJson(obj, extraHeaders = {}) {
   return new Response(JSON.stringify(obj, null, 2), {
@@ -351,29 +353,50 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
   };
 }
 
+/**
+ * Discovery resources document per core spec §8 (GET /discovery/resources):
+ * top level {x402Version, items[], pagination}; each item {resource, type,
+ * x402Version, accepts: [PaymentRequirements], lastUpdated, extensions?}.
+ * Informational fields ride `metadata` as in the spec's example.
+ */
 export async function buildX402Resources(env, origin = CANONICAL_ORIGIN) {
   const items = await liveItems(env);
-  return {
-    schema_version: 1,
-    x402Version: 2,
-    service: SERVICE_NAME,
-    payment: { rail: "x402", network: "eip155:8453", asset: "USDC", scheme: "exact" },
-    resources: items.map((item) => ({
-      resource: `${origin}${toolPath(item)}`,
-      type: "http",
-      method: "GET",
-      methods: ["GET"],
-      x402: true,
-      accepts: ["eip155:8453"],
-      network: "eip155:8453",
-      asset: "USDC",
-      scheme: "exact",
-      price_usd: item.price_usd,
+  const rails = resolveActiveNetworks(env);
+
+  const discoveryItems = items.map((item) => {
+    const url = `${origin}${toolPath(item)}`;
+    const amount = usdToUsdcMicros(item.price_usd);
+    const product = {
+      id: item.sku,
       slug: item.slug,
-      item_type: item.item_type,
+      kind: item.item_type,
       service: item.service_slug,
       summary: item.summary,
-    })),
+      contentHash: item.content_hash,
+      priceUsd: item.price_usd,
+    };
+    return {
+      resource: url,
+      type: "http",
+      x402Version: 2,
+      accepts: rails.map((rail) => buildAcceptEntry(rail, amount)),
+      lastUpdated: item.updated_at ? Math.floor(Date.parse(item.updated_at) / 1000) || Math.floor(Date.now() / 1000) : Math.floor(Date.now() / 1000),
+      extensions: bazaarExtension(url, product),
+      metadata: {
+        sku: item.sku,
+        slug: item.slug,
+        item_type: item.item_type,
+        service: item.service_slug,
+        price_usd: item.price_usd,
+        summary: item.summary,
+      },
+    };
+  });
+
+  return {
+    x402Version: 2,
+    items: discoveryItems,
+    pagination: { limit: discoveryItems.length, offset: 0, total: discoveryItems.length },
     links: { openapi: `${origin}/openapi.json`, tools: `${origin}/api/tools`, llms: `${origin}/llms.txt` },
   };
 }

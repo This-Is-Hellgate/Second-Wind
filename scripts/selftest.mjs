@@ -179,12 +179,43 @@ check(
 );
 check("openapi: free surfaces security []", spec.paths["/api/proof"].get.security.length === 0);
 check("openapi: banned vocabulary absent", !BANNED_WORDS.test(JSON.stringify(spec)), (JSON.stringify(spec).match(BANNED_WORDS) || [""])[0]);
+// Discovery resources document per core spec §8: {x402Version, items[],
+// pagination}; items carry FULL PaymentRequirements in accepts[], a numeric
+// lastUpdated, per-item x402Version, and a validating bazaar extension.
 const resources = await buildX402Resources(env);
-check("resources: one entry per live item", resources.resources.length === 2);
-const urls = resources.resources.map((r2) => r2.resource);
+check("resources: top-level x402Version 2", resources.x402Version === 2);
+check("resources: one item per live tool", resources.items.length === 2);
+check("resources: pagination present", resources.pagination?.total === 2 && typeof resources.pagination.limit === "number");
+const urls = resources.items.map((r2) => r2.resource);
 check("resources: no duplicate URLs", new Set(urls).size === urls.length);
 check("resources: links.tools present", resources.links.tools.endsWith("/api/tools"));
-check("resources: scheme 'exact' everywhere", resources.resources.every((r2) => r2.scheme === "exact"));
+check(
+  "resources: items are spec-shaped (§8.3)",
+  resources.items.every(
+    (r2) =>
+      r2.type === "http" &&
+      r2.x402Version === 2 &&
+      typeof r2.lastUpdated === "number" &&
+      Array.isArray(r2.accepts) &&
+      r2.accepts.every(
+        (acc) =>
+          acc.scheme === "exact" &&
+          /^eip155:\d+$/.test(acc.network) &&
+          typeof acc.amount === "string" &&
+          typeof acc.asset === "string" &&
+          typeof acc.payTo === "string" &&
+          typeof acc.maxTimeoutSeconds === "number"
+      )
+  )
+);
+check(
+  "resources: per-item bazaar validates officially",
+  resources.items.every((r2) => validateDiscoveryExtension(r2.extensions?.bazaar || {})?.valid === true)
+);
+check(
+  "resources: accepts amount matches price",
+  resources.items.every((r2) => Number(r2.accepts[0].amount) === Math.round(r2.metadata.price_usd * 1_000_000))
+);
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

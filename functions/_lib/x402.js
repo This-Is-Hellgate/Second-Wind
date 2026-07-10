@@ -120,9 +120,10 @@ function canonicalResource(requestUrl) {
  * Bazaar discovery extension via the OFFICIAL @x402/extensions helper — the
  * docs warn hand-rolled bazaar blocks fail discovery verification silently.
  * Every paid endpoint is a zero-parameter GET; output carries both an example
- * and a JSON Schema of the paid response shape.
+ * and a JSON Schema of the paid response shape. Exported so the discovery
+ * resources document carries the identical block per item.
  */
-function bazaarExtension(_resource, product) {
+export function bazaarExtension(_resource, product) {
   return declareDiscoveryExtension({
     type: "http",
     method: "GET",

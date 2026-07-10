@@ -6,7 +6,7 @@
  */
 
 const ITEM_COLS =
-  "sku, slug, name, item_type, service_slug, category_slug, price_usd, summary, source_repo, source_path, source_url, license_spdx, provenance, content_hash, version";
+  "sku, slug, name, item_type, service_slug, category_slug, price_usd, summary, source_repo, source_path, source_url, license_spdx, provenance, content_hash, version, updated_at";
 
 export async function liveItems(env) {
   const { results } = await env.SW_DB.prepare(
