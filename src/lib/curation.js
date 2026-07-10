@@ -1,5 +1,5 @@
 /**
- * Curation — the product substrate. The catalog is small and opinionated:
+ * Curation — the product substrate. The tool list is small and opinionated:
  * D1 holds the curated index (items: stub + guidance + invocation) and the
  * relationship graph (edges: how things fit together, with the one-line WHY).
  * That judgment is the deliverable; raw files (R2) are a supporting store for
@@ -22,7 +22,7 @@ export async function liveStubs(env) {
     ).all();
     return results || [];
   } catch {
-    return []; // curation tables absent -> empty catalog, never an error
+    return []; // curation tables absent -> empty tool list, never an error
   }
 }
 

@@ -200,7 +200,7 @@ check("resources: one item per live item", wellKnown.items.length === 5);
 check("GUARD: no guidance in discovery resources", !JSON.stringify(wellKnown).includes(GUIDANCE_MARKER));
 check("resources: Sepolia accepts everywhere", wellKnown.items.every((i) => i.accepts[0].network === "eip155:84532"));
 
-// 8. no D1 binding -> graceful empty catalog, never an error
+// 8. no D1 binding -> graceful empty tool list, never an error
 const bare = await worker.fetch(new Request("https://secondwindai.com/api/tools"), { ...env, SW_DB: undefined }, ctx);
 check("no D1 binding: empty listing, 200", bare.status === 200 && (await bare.json()).total_live === 0);
 

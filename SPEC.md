@@ -30,7 +30,7 @@ GitHub, which is the failure mode this section exists to prevent.
 
 Storage serves that model: **D1 holds the curated index and the relationship graph
 (`items` + `edges`, migrations/0001_curation.sql) — the graph is the moat, first-class data, not
-a README** — plus the operational ledger. The catalog is intentionally small; D1 alone carries
+a README** — plus the operational ledger. The tool list is intentionally small; D1 alone carries
 it (KV can return later as a read cache if latency ever demands). **R2** holds the occasional
 genuine artifact (zips, scripts), reached only through a resolved response at a deliberate
 `/artifact` sub-path behind the same x402 gate — secondary, never the front door. **Free
@@ -44,11 +44,11 @@ verify → settle exercised at zero cost, on the same network the AP2/a2a-x402 r
 use. Promotion to Base mainnet is an env swap (`X402_NETWORK`, `X402_FACILITATOR_URL` → CDP with
 JWT auth, mainnet `payTo`). The proof `payTo` must be a THROWAWAY test wallet (Mike supplies).
 
-**Execution layer (Bedrock) — implemented.** Manifest stubs with `store: "bedrock"` become paid
-`POST` routes: the middleware verifies, the worker invokes the agent via SigV4-signed fetch
+**Execution layer (Bedrock) — implemented.** Curated items with `invoke_kind: "bedrock"` become
+paid `POST` routes: the middleware verifies, the worker invokes the agent via SigV4-signed fetch
 (`aws4fetch`, AWS event-stream decoded in the worker), and settlement happens only when the
 invocation succeeds — a failed agent run never charges the buyer. The bazaar block advertises
-`bodyType: json` with the stub's input schema.
+`bodyType: json` with the item's input schema.
 
 **A2A/AP2 posture.** HTTP is the primary surface, built a2a-x402-shaped: the x402 payment objects
 (PaymentRequirements / PaymentPayload / receipts) stay cleanly separable so the same core can be
@@ -114,7 +114,7 @@ This table is updated in place as steps complete.
 | 3 | First repo intake | Mike sends an AWS repo; tool candidates drafted — each a small task an agent fails at: sku, price ≤ $1.00 USDC, summary, source repo/path, SPDX license, content hash | Every draft passes field validation (price cap, license, completeness); Mike has approved or rejected each candidate individually; at least one approved tool exists | Blocked on Step 2 + first repo |
 | 4 | First publish | With Mike's explicit go — approved tools written as OBJECTS: KV (text) / R2 (bundles) / bedrock stubs, plus their manifest entries. The object store is law from that moment | `/api/proof` count equals the manifest exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved; each object fetches and matches its content hash | Blocked on Step 3 |
 | 5 | Mainnet promotion + real sale | Env swap to `eip155:8453` + CDP facilitator (JWT secrets) + mainnet payTo; canary purchase with real cents | Same proofs as Step 2 on mainnet; CDP settle confirmed on Base | Blocked on Step 4 |
-| 6 | Get discovered | Confirm the facilitator catalogs the resources (`EXTENSION-RESPONSES` bazaar status `success`; presence in `/discovery/resources`); submit to x402scan and ecosystem registries | Resource visible in at least one facilitator discovery index with no schema rejections; x402scan lists without extraction errors | Blocked on Step 5 |
+| 6 | Get discovered | Confirm the facilitator indexes the resources (`EXTENSION-RESPONSES` bazaar status `success`; presence in `/discovery/resources`); submit to x402scan and ecosystem registries | Resource visible in at least one facilitator discovery index with no schema rejections; x402scan lists without extraction errors | Blocked on Step 5 |
 | 7 | Scale intake | Repo after repo, each batch through the Step 3 → 4 gates | Same gates as Steps 3–4, every batch | Ongoing after Step 6 |
 | — | Parallel: Second Eyes | Take the conformance gap list back to Second Eyes (MCP transport for mcp-unblock, signed receipts, hand-rolled bazaar risk) | Independent of the gates above | Open |
 
