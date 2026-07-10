@@ -7,9 +7,8 @@ pages_build_output_dir = "public"
 # FIRST PROOF: Base Sepolia + public x402.org facilitator (no auth, valueless
 # test USDC). Promotion to mainnet is a config swap: X402_NETWORK=eip155:8453,
 # X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402 (CDP JWT
-# secrets), and a mainnet payTo.
-# TODO(Mike): replace payTo with a THROWAWAY Base Sepolia test wallet — do not
-# reuse an address that also holds real funds.
+# secrets). payTo confirmed by Mike 2026-07-10: the Second Wind settlement
+# wallet (already public in every discovery document — no new linkage).
 X402_NETWORK = "eip155:84532"
 X402_FACILITATOR_URL = "https://x402.org/facilitator"
 X402_PAYTO_PUBLIC = "0xa395b99E69A77479e3882320bea9bFC6972EEc14"
