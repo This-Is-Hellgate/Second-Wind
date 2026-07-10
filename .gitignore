@@ -4,3 +4,8 @@ cdp-credentials.local.json
 *.local.json
 .env
 .env.*
+
+# build artifact (rebuilt by CI before deploy)
+public/_worker.js
+# local dev secrets
+.dev.vars

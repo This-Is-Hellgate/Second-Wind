@@ -10,13 +10,35 @@ is proven, (2) the step-by-step action plan with the proof required to advance e
 
 ---
 
+## 0. Architecture
+
+**The gatekeeper is the official x402 SDK.** Serving runs as a Hono app on Cloudflare Workers
+(`src/worker.js`, bundled to `public/_worker.js`) using `@x402/hono` + `@x402/core` +
+`@x402/evm` — the pattern of the official CloudFront/Lambda@Edge example, on the edge runtime we
+already operate. The middleware verifies payment before the handler and settles ONLY after the
+handler succeeds: a buyer is never charged for a failed response. Payment routes are generated
+from the live D1 rows (60-second isolate cache); the CDP facilitator authenticates via
+`createAuthHeaders` (CDP JWT). Hand-rolled payment code no longer serves payments — it survives
+only inside the discovery-document generators pending their port.
+
+Storage: **D1** holds the records (tools, payments ledger, deliveries, request log). **KV** holds
+the goods (tool content: markdown/JSON) — `content` is delivered from KV when stocked. **R2** is
+reserved for downloadable bundles. **AWS (Bedrock)** executes behind the paywall when a tool
+requires computation; Cloudflare verifies, proxies, settles after success.
+
+The legacy `functions/` handlers remain in-repo until the gatekeeper's production cutover is
+proven (`_worker.js` takes precedence on Pages; the old code is inert once deployed).
+
 ## 1. Conformance status
 
-Proof for every "Verified" row is machine-checked by `scripts/selftest.mjs`, which validates the
-actual emitted objects against JSON Schemas transcribed from the spec's field tables
-(`scripts/spec-schemas.mjs`) and decodes wire surfaces with the official `@x402/core` and
-`@x402/extensions` packages. The suite encodes the spec, not this codebase: it was proven to fail
-the previously non-conformant discovery document.
+Proof for every "Verified" row is machine-checked by two suites run in CI before any deploy:
+`scripts/selftest.mjs` (discovery generators, shared libraries, facilitator body, settlement
+shapes) and `scripts/worker-selftest.mjs` (the REAL gatekeeper worker end-to-end: SDK-emitted
+402s, free surfaces, redirects, teaching 405s, HEAD, vocabulary ban). Both validate emitted
+objects against JSON Schemas transcribed from the spec's field tables
+(`scripts/spec-schemas.mjs`) and decode wire surfaces with the official `@x402/core` and
+`@x402/extensions` packages. The suites encode the spec, not this codebase: the schema layer was
+proven to fail the previously non-conformant discovery document.
 
 | Rulebook section | Status | Proof |
 | --- | --- | --- |
@@ -56,7 +78,7 @@ This table is updated in place as steps complete.
 
 | # | Step | Action | Gate: what must be proven to advance | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Ship the foundation | Push the conformance commits; workflow auto-deploys secondwindai.com | Production `/api/proof` returns the new shape; `/api/catalog` 308s to `/api/tools`; production `/.well-known/x402` validates against the §8 schema; production `/openapi.json` carries `components.schemas`; official `@x402/fetch` decodes a production 402 | **Ready — awaiting explicit deploy approval** |
+| 1 | Ship the gatekeeper | Push the commits; CI runs both conformance suites, builds the worker, auto-deploys secondwindai.com (official-SDK serving replaces the hand-rolled core in production) | Production `/api/proof` returns the new shape; `/api/catalog` 308s to `/api/tools`; production `/.well-known/x402` validates against the §8 schema; production `/openapi.json` carries `components.schemas`; official `@x402/fetch` decodes a production 402 emitted by the SDK middleware | **Ready — awaiting explicit deploy approval** |
 | 2 | First repo intake | Mike sends an AWS repo; tool candidates drafted — each a small task an agent fails at: sku, price ≤ $1.00 USDC, summary, source repo/path, SPDX license, content hash | Every draft passes field validation (price cap, license, completeness); Mike has approved or rejected each candidate individually; at least one approved tool exists | Blocked on Step 1 + first repo |
 | 3 | First publish | With Mike's explicit go — the only database write — approved tools written to production D1. The database is law from that moment | `/api/proof` count equals approved count exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved | Blocked on Step 2 |
 | 4 | Prove one real sale | Canary purchase with Mike's wallet via the official client | 200 with `PAYMENT-RESPONSE` decoding to a success SettlementResponse; transaction confirmed on Base; payments + deliveries rows written; a retried signed payment re-delivers free; a failed settlement shows `settle_failed` and permits retry | Blocked on Step 3 |
