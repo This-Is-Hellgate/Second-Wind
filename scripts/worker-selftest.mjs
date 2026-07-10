@@ -63,6 +63,23 @@ const manifest = [
     key: "bundle:AWS-0999",
     mime_type: "application/zip",
   },
+  {
+    sku: "AWS-1001",
+    slug: "lambda-rescue-agent",
+    name: "lambda-rescue-agent",
+    item_type: "agent",
+    service: "lambda",
+    price_usd: 0.05,
+    summary: "Bedrock agent that diagnoses and remediates runaway Lambda execution loops.",
+    source: { repo: "", path: "", url: "", license_spdx: "", provenance: "synthesized" },
+    content_hash: "aa11aa11aa11aa11",
+    version: 1,
+    updated_at: "2026-07-10T12:00:00.000Z",
+    store: "bedrock",
+    key: "AGENT12345/ALIAS1",
+    input_example: { input: "my lambda is stuck in a retry loop" },
+    input_schema: { properties: { input: { type: "string", description: "The task for the agent" }, sessionId: { type: "string" } }, required: ["input"] },
+  },
 ];
 const kvData = new Map([
   ["manifest", JSON.stringify(manifest)],
@@ -71,10 +88,12 @@ const kvData = new Map([
 
 const env = {
   X402_PAYTO_PUBLIC: "0xa395b99E69A77479e3882320bea9bFC6972EEc14",
-  X402_FACILITATOR_URL: "https://api.cdp.coinbase.com/platform/v2/x402",
+  // FIRST PROOF config: Base Sepolia + public x402.org facilitator.
+  X402_NETWORK: "eip155:84532",
+  X402_FACILITATOR_URL: "https://x402.org/facilitator",
   // Offline facilitator /supported fixture — the test runs with no network.
   X402_TEST_SUPPORTED_KINDS: JSON.stringify({
-    kinds: [{ x402Version: 2, scheme: "exact", network: "eip155:8453" }],
+    kinds: [{ x402Version: 2, scheme: "exact", network: "eip155:84532" }],
     extensions: [],
     signers: { "eip155:*": ["0x0000000000000000000000000000000000000000"] },
   }),
@@ -127,13 +146,14 @@ const BANNED_WORDS = /"[^"]*\b(catalog|shelf|shelves|lounge|door)\b[^"]*"/i;
 // 1. free surfaces — driven by the KV manifest
 const proof = await call("/api/proof");
 const proofBody = await proof.json();
-check("proof: 200 + tools_live from manifest", proof.status === 200 && proofBody.tools_live === 2, String(proofBody.tools_live));
+check("proof: 200 + tools_live from manifest", proof.status === 200 && proofBody.tools_live === 3, String(proofBody.tools_live));
+check("proof: network from config (Sepolia)", proofBody.payment.network === "eip155:84532", proofBody.payment.network);
 check("proof: banned vocabulary absent", !BANNED_WORDS.test(JSON.stringify(proofBody)));
 
 const tools = await call("/api/tools");
 const toolsBody = await tools.json();
-check("tools: 200 with both objects listed", tools.status === 200 && toolsBody.total_live === 2);
-check("tools: bundle listed alongside text tool", JSON.stringify(toolsBody).includes("lambda-rescue-bundle"));
+check("tools: 200 with all objects listed", tools.status === 200 && toolsBody.total_live === 3);
+check("tools: bundle + agent listed alongside text tool", JSON.stringify(toolsBody).includes("lambda-rescue-bundle") && JSON.stringify(toolsBody).includes("lambda-rescue-agent"));
 
 // 2. redirect + 405 + HEAD + assets
 const redir = await call("/api/catalog");
@@ -160,8 +180,9 @@ try {
 if (pr) {
   specCheck("§5.1 PaymentRequired (SDK-emitted header)", PaymentRequiredSchema, pr);
   const a = pr.accepts[0];
-  check("402: scheme exact on Base mainnet", a.scheme === "exact" && a.network === "eip155:8453");
-  check("402: payTo is Second Wind wallet", (a.payTo || "").toLowerCase() === env.X402_PAYTO_PUBLIC.toLowerCase());
+  check("402: scheme exact on Base Sepolia", a.scheme === "exact" && a.network === "eip155:84532", a.network);
+  check("402: Sepolia USDC asset", a.asset === "0x036CbD53842c5426634e7929541eC2318f3dCF7e", a.asset);
+  check("402: payTo is the configured wallet", (a.payTo || "").toLowerCase() === env.X402_PAYTO_PUBLIC.toLowerCase());
   check("402: amount = $0.15 in micros", a.amount === "150000", String(a.amount));
   check("402: EIP-712 extra present", Boolean(a.extra?.name && a.extra?.version));
   check("402: resource.serviceName set", pr.resource?.serviceName === "Second Wind");
@@ -178,23 +199,81 @@ check("paid: R2 bundle route also 402", unpaidBundle.status === 402);
 const bundlePr = decodePaymentRequiredHeader(unpaidBundle.headers.get("PAYMENT-REQUIRED"));
 check("bundle 402: amount = $0.95 in micros", bundlePr.accepts[0].amount === "950000", bundlePr.accepts[0].amount);
 
-// 5. not in the manifest -> not for sale -> 404
+// 5. the execution tool — POST is the paid method; the bazaar block carries
+//    bodyType json + input schema; GET teaches POST without charging
+const unpaidAgent = await call("/api/x402/lambda-rescue-agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: "help" }) });
+check("agent: unpaid POST -> 402", unpaidAgent.status === 402, String(unpaidAgent.status));
+const agentPr = decodePaymentRequiredHeader(unpaidAgent.headers.get("PAYMENT-REQUIRED"));
+specCheck("§5.1 PaymentRequired (execution tool)", PaymentRequiredSchema, agentPr);
+check("agent 402: bazaar advertises POST json body", agentPr.extensions?.bazaar?.info?.input?.method === "POST" && agentPr.extensions?.bazaar?.info?.input?.bodyType === "json");
+check("agent 402: bazaar validates officially", validateDiscoveryExtension(agentPr.extensions?.bazaar || {})?.valid === true);
+const agentGet = await call("/api/x402/lambda-rescue-agent");
+check("agent: GET teaches POST (no charge)", agentGet.status === 405 && (await agentGet.json()).hint.includes("POST"));
+
+// 6. not in the manifest -> not for sale -> 404
 const missing = await call("/api/x402/nonexistent-tool");
 check("unknown tool: 404 with pointer", missing.status === 404 && (await missing.json()).tools === "/api/tools");
 
-// 6. discovery documents — generated from the manifest
+// 7. discovery documents — generated from the manifest
 const openapi = await (await call("/openapi.json")).json();
 check("openapi: components.schemas present", Object.keys(openapi.components?.schemas || {}).length >= 6);
-check("openapi: both object paths present", Boolean(openapi.paths["/api/x402/dynamodb-throttle-diagnostic"]) && Boolean(openapi.paths["/api/x402/lambda-rescue-bundle"]));
+check("openapi: all object paths present", Boolean(openapi.paths["/api/x402/dynamodb-throttle-diagnostic"]) && Boolean(openapi.paths["/api/x402/lambda-rescue-bundle"]) && Boolean(openapi.paths["/api/x402/lambda-rescue-agent"]));
 check("openapi: bundle delivers binary", JSON.stringify(openapi.paths["/api/x402/lambda-rescue-bundle"].get.responses["200"]).includes("octet-stream"));
+check("openapi: agent is POST with requestBody", Boolean(openapi.paths["/api/x402/lambda-rescue-agent"].post?.requestBody));
 check("openapi: banned vocabulary absent", !BANNED_WORDS.test(JSON.stringify(openapi)), (JSON.stringify(openapi).match(BANNED_WORDS) || [""])[0]);
 const wellKnown = await (await call("/.well-known/x402")).json();
 specCheck("§8 discovery resources document", DiscoveryResponseSchema, wellKnown);
-check("resources: one item per object", wellKnown.items.length === 2);
+check("resources: one item per object", wellKnown.items.length === 3);
+check("resources: Sepolia accepts everywhere", wellKnown.items.every((i) => i.accepts[0].network === "eip155:84532" && i.accepts[0].asset === "0x036CbD53842c5426634e7929541eC2318f3dCF7e"));
 
-// 7. no KV binding -> graceful empty inventory, never an error
+// 8. no KV binding -> graceful empty inventory, never an error
 const bare = await worker.fetch(new Request("https://secondwindai.com/api/tools"), { ...env, SW_KV: undefined }, ctx);
 check("no KV binding: empty listing, 200", bare.status === 200 && (await bare.json()).total_live === 0);
+
+// 9. Bedrock origin units — event-stream decode + signed invoke (fetch stubbed)
+const { decodeEventStreamCompletion, invokeAgent } = await import("../src/lib/bedrock.js");
+const encoder = new TextEncoder();
+function frame(eventType, payloadObj) {
+  const name = encoder.encode(":event-type");
+  const value = encoder.encode(eventType);
+  const headers = new Uint8Array(1 + name.length + 1 + 2 + value.length);
+  let o = 0;
+  headers[o++] = name.length;
+  headers.set(name, o); o += name.length;
+  headers[o++] = 7; // string type
+  new DataView(headers.buffer).setUint16(o, value.length); o += 2;
+  headers.set(value, o);
+  const payload = encoder.encode(JSON.stringify(payloadObj));
+  const total = 12 + headers.length + payload.length + 4;
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, total);
+  dv.setUint32(4, headers.length);
+  out.set(headers, 12);
+  out.set(payload, 12 + headers.length);
+  return out;
+}
+const chunkText = "Shard the hot key.";
+const stream = new Uint8Array([...frame("chunk", { bytes: btoa(chunkText) }), ...frame("trace", { note: "ignored" })]);
+check("bedrock: event-stream decode extracts completion", decodeEventStreamCompletion(stream) === chunkText, JSON.stringify(decodeEventStreamCompletion(stream)));
+
+const realFetch = globalThis.fetch;
+let signedAuth = "";
+globalThis.fetch = async (url, init) => {
+  const u = typeof url === "string" ? url : url.url;
+  if (u.includes("bedrock-agent-runtime")) {
+    signedAuth = (init?.headers?.Authorization || init?.headers?.get?.("Authorization") || new Headers(init?.headers).get("Authorization") || (url.headers && url.headers.get("Authorization"))) ?? "";
+    return new Response(stream, { status: 200 });
+  }
+  throw new Error(`unexpected fetch: ${u}`);
+};
+const bedrockEnv = { AWS_ACCESS_KEY_ID: "AKIATEST", AWS_SECRET_ACCESS_KEY: "secret", AWS_REGION: "us-east-1" };
+const run = await invokeAgent(bedrockEnv, "AGENT12345/ALIAS1", { input: "help my lambda" });
+globalThis.fetch = realFetch;
+check("bedrock: invoke returns completion via SigV4 fetch", run.ok === true && run.completion === chunkText, JSON.stringify(run).slice(0, 120));
+check("bedrock: request was SigV4-signed", /AWS4-HMAC-SHA256/.test(signedAuth), signedAuth.slice(0, 40));
+const unconfigured = await invokeAgent({}, "A/B", { input: "x" });
+check("bedrock: unconfigured -> 503 (never charge)", unconfigured.ok === false && unconfigured.status === 503);
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

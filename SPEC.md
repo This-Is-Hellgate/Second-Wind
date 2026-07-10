@@ -30,6 +30,25 @@ intake work plus the operational ledger (payments, deliveries, request log); the
 never reads tool data from it. **AWS (Bedrock)** executes behind the paywall when a tool requires
 computation; Cloudflare verifies, proxies, settles after success.
 
+**Network is config, not a constant.** The first proof runs **Base Sepolia (`eip155:84532`)**
+with valueless test USDC via the public `x402.org` facilitator (no auth) — real on-chain
+verify → settle exercised at zero cost, on the same network the AP2/a2a-x402 reference samples
+use. Promotion to Base mainnet is an env swap (`X402_NETWORK`, `X402_FACILITATOR_URL` → CDP with
+JWT auth, mainnet `payTo`). The proof `payTo` must be a THROWAWAY test wallet (Mike supplies).
+
+**Execution layer (Bedrock) — implemented.** Manifest stubs with `store: "bedrock"` become paid
+`POST` routes: the middleware verifies, the worker invokes the agent via SigV4-signed fetch
+(`aws4fetch`, AWS event-stream decoded in the worker), and settlement happens only when the
+invocation succeeds — a failed agent run never charges the buyer. The bazaar block advertises
+`bodyType: json` with the stub's input schema.
+
+**A2A/AP2 posture.** HTTP is the primary surface, built a2a-x402-shaped: the x402 payment objects
+(PaymentRequirements / PaymentPayload / receipts) stay cleanly separable so the same core can be
+carried over A2A tasks or nested in an AP2 CartMandate later. The AgentCard
+`capabilities.extensions` declaration of the a2a-x402 URI is DEFERRED until an actual A2A task
+endpoint exists — no advertised transport without an implementation behind it. MCP exposure is a
+possible later second face; it is not the discovery surface A2A/AP2 consume.
+
 The legacy `functions/` handlers remain in-repo until the gatekeeper's production cutover is
 proven (`_worker.js` takes precedence on Pages; the old code is inert once deployed).
 
@@ -82,12 +101,13 @@ This table is updated in place as steps complete.
 
 | # | Step | Action | Gate: what must be proven to advance | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Ship the gatekeeper | Push the commits; CI runs both conformance suites, builds the worker, auto-deploys secondwindai.com (official-SDK serving replaces the hand-rolled core in production) | Production `/api/proof` returns the new shape; `/api/catalog` 308s to `/api/tools`; production `/.well-known/x402` validates against the §8 schema; production `/openapi.json` carries `components.schemas`; official `@x402/fetch` decodes a production 402 emitted by the SDK middleware | **Ready — awaiting explicit deploy approval** |
-| 2 | First repo intake | Mike sends an AWS repo; tool candidates drafted — each a small task an agent fails at: sku, price ≤ $1.00 USDC, summary, source repo/path, SPDX license, content hash | Every draft passes field validation (price cap, license, completeness); Mike has approved or rejected each candidate individually; at least one approved tool exists | Blocked on Step 1 + first repo |
-| 3 | First publish | With Mike's explicit go — approved tools written as OBJECTS: KV (text) / R2 (bundles) plus their manifest stubs. The object store is law from that moment. (Also creates the KV namespace / R2 bucket bindings, Mike-gated infra) | `/api/proof` count equals the manifest exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved; each object fetches and matches its content hash | Blocked on Step 2 |
-| 4 | Prove one real sale | Canary purchase with Mike's wallet via the official client | 200 with `PAYMENT-RESPONSE` decoding to a success SettlementResponse; transaction confirmed on Base; payments + deliveries rows written; a retried signed payment re-delivers free; a failed settlement shows `settle_failed` and permits retry | Blocked on Step 3 |
-| 5 | Get discovered | Confirm CDP catalogs the resources (`EXTENSION-RESPONSES` bazaar status `success`; presence in CDP `/discovery/resources`); submit to x402scan and ecosystem registries | Resource visible in at least one facilitator discovery index with no schema rejections; x402scan lists without extraction errors | Blocked on Step 4 |
-| 6 | Scale intake | Repo after repo, each batch through the Step 2 → 3 gates | Same gates as Steps 2–3, every batch | Ongoing after Step 5 |
+| 1 | Ship the gatekeeper (Sepolia config) | Mike supplies a throwaway Base Sepolia test wallet for `payTo`; push the commits; CI runs both conformance suites, builds the worker, auto-deploys secondwindai.com; Mike-gated infra: create the KV namespace (+ R2 bucket) bindings | Production `/api/proof` returns the new shape on `eip155:84532`; `/api/catalog` 308s to `/api/tools`; production `/.well-known/x402` validates against the §8 schema; production `/openapi.json` carries `components.schemas`; official `@x402/fetch` decodes a production 402 emitted by the SDK middleware | **Ready — awaiting throwaway wallet + deploy approval** |
+| 2 | Sepolia proof of the money path | Seed ONE test object into KV (Mike-gated write); canary purchase with a test wallet via the official client — real on-chain verify → settle with valueless USDC through x402.org | 200 with `PAYMENT-RESPONSE` decoding to a success SettlementResponse; transaction confirmed on Base Sepolia; ledger rows written; a failed handler response is NOT charged (settle-after-success observed); if a Bedrock stub is configured: paid POST runs the agent end-to-end | Blocked on Step 1 |
+| 3 | First repo intake | Mike sends an AWS repo; tool candidates drafted — each a small task an agent fails at: sku, price ≤ $1.00 USDC, summary, source repo/path, SPDX license, content hash | Every draft passes field validation (price cap, license, completeness); Mike has approved or rejected each candidate individually; at least one approved tool exists | Blocked on Step 2 + first repo |
+| 4 | First publish | With Mike's explicit go — approved tools written as OBJECTS: KV (text) / R2 (bundles) / bedrock stubs, plus their manifest entries. The object store is law from that moment | `/api/proof` count equals the manifest exactly; each tool's 402 passes the spec suite against production; its openapi path and discovery item appear, spec-valid; `/api/tools` lists exactly what was approved; each object fetches and matches its content hash | Blocked on Step 3 |
+| 5 | Mainnet promotion + real sale | Env swap to `eip155:8453` + CDP facilitator (JWT secrets) + mainnet payTo; canary purchase with real cents | Same proofs as Step 2 on mainnet; CDP settle confirmed on Base | Blocked on Step 4 |
+| 6 | Get discovered | Confirm the facilitator catalogs the resources (`EXTENSION-RESPONSES` bazaar status `success`; presence in `/discovery/resources`); submit to x402scan and ecosystem registries | Resource visible in at least one facilitator discovery index with no schema rejections; x402scan lists without extraction errors | Blocked on Step 5 |
+| 7 | Scale intake | Repo after repo, each batch through the Step 3 → 4 gates | Same gates as Steps 3–4, every batch | Ongoing after Step 6 |
 | — | Parallel: Second Eyes | Take the conformance gap list back to Second Eyes (MCP transport for mcp-unblock, signed receipts, hand-rolled bazaar risk) | Independent of the gates above | Open |
 
 ---

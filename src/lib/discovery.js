@@ -7,6 +7,7 @@
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { SERVICE_NAME, TAGLINE, CANONICAL_ORIGIN } from "./brand.js";
 import { listTools } from "./inventory.js";
+import { activeNetwork, activePayTo } from "./networks.js";
 
 export function discoveryJson(obj, extraHeaders = {}) {
   return new Response(JSON.stringify(obj, null, 2), {
@@ -26,6 +27,33 @@ function toolPath(stub) {
 
 /** The bazaar discovery block for one tool — official helper output only. */
 export function toolBazaarExtension(stub) {
+  // Execution tools (Bedrock agents) are POST with a JSON body; the manifest
+  // stub carries the input schema and example the bazaar block advertises.
+  if (stub.store === "bedrock") {
+    return declareDiscoveryExtension({
+      type: "http",
+      method: "POST",
+      bodyType: "json",
+      input: stub.input_example || { input: "describe the task" },
+      inputSchema: stub.input_schema || {
+        properties: { input: { type: "string", description: "The task for the agent" }, sessionId: { type: "string" } },
+        required: ["input"],
+      },
+      output: {
+        type: "json",
+        example: { sku: stub.sku, completion: "agent response text", sessionId: "uuid" },
+        schema: {
+          type: "object",
+          properties: {
+            sku: { type: "string" },
+            completion: { type: "string" },
+            sessionId: { type: "string" },
+          },
+          required: ["sku", "completion"],
+        },
+      },
+    });
+  }
   return declareDiscoveryExtension({
     type: "http",
     method: "GET",
@@ -89,7 +117,7 @@ function componentSchemas() {
           type: "object",
           properties: {
             rail: { type: "string", const: "x402" },
-            network: { type: "string", const: "eip155:8453" },
+            network: { type: "string" },
             asset: { type: "string", const: "USDC" },
             how: { type: "string" },
           },
@@ -110,7 +138,7 @@ function componentSchemas() {
           properties: {
             rail: { type: "string", const: "x402" },
             x402Version: { type: "integer", const: 2 },
-            network: { type: "string", const: "eip155:8453" },
+            network: { type: "string" },
             asset: { type: "string", const: "USDC" },
             payTo_configured: { type: "boolean" },
             facilitator_configured: { type: "boolean" },
@@ -236,11 +264,56 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
   const paths = {};
 
   for (const stub of tools) {
+    if (stub.store === "bedrock") {
+      paths[toolPath(stub)] = {
+        post: {
+          operationId: `${stub.slug || stub.sku}_post`,
+          summary: String(stub.summary || "").slice(0, 120),
+          description: `${stub.summary} Paid execution endpoint — pay per invocation (USDC via x402), the agent runs, the response returns. Settlement happens only when execution succeeds. ~$${stub.price_usd} USDC.`,
+          tags: ["paid", "x402", "execution", stub.item_type, stub.service].filter(Boolean),
+          "x-price-usd": stub.price_usd,
+          security: [{ x402Payment: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: stub.input_schema || {
+                  type: "object",
+                  properties: {
+                    input: { type: "string", description: "The task for the agent" },
+                    sessionId: { type: "string", description: "Optional session continuity id" },
+                  },
+                  required: ["input"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Paid and executed. Body carries the agent completion.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { sku: { type: "string" }, completion: { type: "string" }, sessionId: { type: "string" } },
+                    required: ["sku", "completion"],
+                  },
+                },
+              },
+            },
+            402: paidResponses(stub)[402],
+            404: paidResponses(stub)[404],
+            405: paidResponses(stub)[405],
+          },
+        },
+      };
+      continue;
+    }
     paths[toolPath(stub)] = {
       get: {
         operationId: `${stub.slug || stub.sku}_get`,
         summary: String(stub.summary || "").slice(0, 120),
-        description: `${stub.summary} Session-less x402 paid endpoint — pay once (USDC on Base) and receive the tool. ~$${stub.price_usd} USDC.`,
+        description: `${stub.summary} Session-less x402 paid endpoint — pay once (USDC) and receive the tool. ~$${stub.price_usd} USDC.`,
         tags: ["paid", "x402", stub.item_type, stub.service].filter(Boolean),
         "x-price-usd": stub.price_usd,
         security: [{ x402Payment: [] }],
@@ -327,7 +400,8 @@ export async function buildOpenApi(env, origin = CANONICAL_ORIGIN) {
  */
 export async function buildX402Resources(env, origin = CANONICAL_ORIGIN) {
   const tools = await listTools(env);
-  const payTo = env.X402_PAYTO || env.X402_PAYTO_PUBLIC || "";
+  const payTo = activePayTo(env);
+  const net = activeNetwork(env);
 
   const items = tools.map((stub) => ({
     resource: `${origin}${toolPath(stub)}`,
@@ -336,12 +410,12 @@ export async function buildX402Resources(env, origin = CANONICAL_ORIGIN) {
     accepts: [
       {
         scheme: "exact",
-        network: "eip155:8453",
+        network: net.id,
         amount: usdToMicros(stub.price_usd),
-        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913",
+        asset: net.usdc,
         payTo,
         maxTimeoutSeconds: 300,
-        extra: { name: "USD Coin", version: "2" },
+        extra: { ...net.eip712 },
       },
     ],
     lastUpdated: stub.updated_at ? Math.floor(Date.parse(stub.updated_at) / 1000) || Math.floor(Date.now() / 1000) : Math.floor(Date.now() / 1000),

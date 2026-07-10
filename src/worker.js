@@ -33,28 +33,34 @@ import { listTools, countTools, findTool, getGoods } from "./lib/inventory.js";
 import { recordSettledSale, recordDelivery, logRequest } from "./lib/ledger.js";
 import { buildOpenApi, buildX402Resources, discoveryJson, toolBazaarExtension } from "./lib/discovery.js";
 import { buildCdpAuthHeaders, facilitatorPaths } from "./lib/cdp-auth.js";
-
-const NETWORK = "eip155:8453"; // Base mainnet only, by design
+import { activeNetwork, activePayTo, activeFacilitatorUrl, isCdpFacilitator } from "./lib/networks.js";
+import { invokeAgent } from "./lib/bedrock.js";
 
 /* ------------------------------------------------------------------ *
  * Payment server — official SDK, constructed per manifest snapshot
  * ------------------------------------------------------------------ */
 
 /**
- * CDP facilitator client. createAuthHeaders returns per-path header maps per
- * the @x402/core FacilitatorConfig contract.
+ * Facilitator client. Plain URL for open facilitators (x402.org testnet);
+ * CDP gets createAuthHeaders (per-path CDP JWTs) per the @x402/core
+ * FacilitatorConfig contract.
  */
 function facilitatorClient(env) {
-  const configured = env.X402_FACILITATOR_URL || "https://api.cdp.coinbase.com/platform/v2/x402";
-  const paths = facilitatorPaths(configured);
-  const client = new HTTPFacilitatorClient({
-    url: `${paths.base}/platform/v2/x402`,
-    createAuthHeaders: async () => ({
-      verify: await buildCdpAuthHeaders(env, "POST", paths.verifyPath),
-      settle: await buildCdpAuthHeaders(env, "POST", paths.settlePath),
-      supported: await buildCdpAuthHeaders(env, "GET", "/platform/v2/x402/supported"),
-    }),
-  });
+  const configured = activeFacilitatorUrl(env);
+  let client;
+  if (isCdpFacilitator(configured)) {
+    const paths = facilitatorPaths(configured);
+    client = new HTTPFacilitatorClient({
+      url: `${paths.base}/platform/v2/x402`,
+      createAuthHeaders: async () => ({
+        verify: await buildCdpAuthHeaders(env, "POST", paths.verifyPath),
+        settle: await buildCdpAuthHeaders(env, "POST", paths.settlePath),
+        supported: await buildCdpAuthHeaders(env, "GET", "/platform/v2/x402/supported"),
+      }),
+    });
+  } else {
+    client = new HTTPFacilitatorClient({ url: configured.replace(/\/$/, "") });
+  }
   // Offline test fixture: the selftest runs with no network, so it supplies
   // the facilitator /supported contract itself. Never set in production.
   if (env.X402_TEST_SUPPORTED_KINDS) {
@@ -64,15 +70,15 @@ function facilitatorClient(env) {
 }
 
 /** One RouteConfig per live tool, from its manifest stub. */
-function routeForStub(stub, payTo) {
+function routeForStub(stub, payTo, network) {
   const url = `${CANONICAL_ORIGIN}/api/x402/${stub.slug || stub.sku}`;
   return {
     accepts: [
       {
         scheme: "exact",
-        network: NETWORK,
+        network,
         payTo,
-        price: `$${Number(stub.price_usd).toFixed(2)}`,
+        price: `$${Number(stub.price_usd).toFixed(stub.price_usd < 0.01 ? 3 : 2)}`,
       },
     ],
     description: `${stub.name} — ${String(stub.summary || "").slice(0, 140)}`,
@@ -88,6 +94,11 @@ function routeForStub(stub, payTo) {
   };
 }
 
+/** Execution tools sell POST; object tools sell GET. */
+function methodForStub(stub) {
+  return stub.store === "bedrock" ? "POST" : "GET";
+}
+
 /**
  * The payment middleware is rebuilt when the manifest changes; cached per
  * isolate for 60s so route lookups stay cheap without drifting from the
@@ -99,15 +110,17 @@ async function getPaymentMiddleware(env) {
   const now = Date.now();
   if (paymentCache.middleware && now < paymentCache.expires) return paymentCache.middleware;
 
-  const payTo = env.X402_PAYTO || env.X402_PAYTO_PUBLIC;
+  const payTo = activePayTo(env);
   if (!payTo) return null;
 
+  const net = activeNetwork(env);
   const tools = await listTools(env);
   const routes = {};
   for (const stub of tools) {
-    const route = routeForStub(stub, payTo);
-    routes[`GET /api/x402/${stub.slug || stub.sku}`] = route;
-    if (stub.slug && stub.sku !== stub.slug) routes[`GET /api/x402/${stub.sku}`] = route;
+    const route = routeForStub(stub, payTo, net.id);
+    const method = methodForStub(stub);
+    routes[`${method} /api/x402/${stub.slug || stub.sku}`] = route;
+    if (stub.slug && stub.sku !== stub.slug) routes[`${method} /api/x402/${stub.sku}`] = route;
   }
   if (Object.keys(routes).length === 0) {
     paymentCache.middleware = "empty";
@@ -116,7 +129,7 @@ async function getPaymentMiddleware(env) {
   }
 
   const resourceServer = new x402ResourceServer(facilitatorClient(env))
-    .register(NETWORK, new ExactEvmScheme())
+    .register(net.id, new ExactEvmScheme())
     // Ledger: the record of every settled sale stays in D1. Errors here must
     // never break delivery — the settlement already happened on-chain.
     .onAfterSettle(async (context) => {
@@ -129,7 +142,7 @@ async function getPaymentMiddleware(env) {
           price_usd: Number(context.requirements?.amount || 0) / 1_000_000,
           amount_usdc_micros: String(context.requirements?.amount || ""),
           payer: context.result?.payer || "",
-          network: context.requirements?.network || NETWORK,
+          network: context.requirements?.network || "",
           scheme: context.requirements?.scheme || "exact",
           idempotency_key: `settle:${context.result?.transaction || crypto.randomUUID()}`,
           tx_hash: context.result?.transaction || "",
@@ -217,7 +230,7 @@ app.get("/api/proof", async (c) => {
       payment: {
         rail: "x402",
         x402Version: 2,
-        network: NETWORK,
+        network: activeNetwork(c.env).id,
         asset: "USDC",
         payTo_configured: Boolean(c.env.X402_PAYTO_PUBLIC || c.env.X402_PAYTO),
         facilitator_configured: Boolean(c.env.X402_FACILITATOR_URL),
@@ -242,7 +255,7 @@ app.get("/api/tools", async (c) => {
       service: SERVICE_NAME,
       tagline: TAGLINE,
       total_live: tools.length,
-      payment: { rail: "x402", network: NETWORK, asset: "USDC", how: "GET any tool URL -> 402 -> sign -> retry with PAYMENT-SIGNATURE" },
+      payment: { rail: "x402", network: activeNetwork(c.env).id, asset: "USDC", how: "GET any tool URL -> 402 -> sign -> retry with PAYMENT-SIGNATURE" },
       tools: tools.map((t) => ({
         sku: t.sku,
         name: t.name,
@@ -272,10 +285,40 @@ app.use("/api/x402/*", async (c, next) => {
   return middleware(c, next);
 });
 
+// Paid execution — Bedrock agents. Verified by the middleware above; a
+// failed invocation returns >= 400, so the SDK cancels settlement and the
+// buyer is never charged for a failed run.
+app.post("/api/x402/:key", async (c) => {
+  const stub = await findTool(c.env, c.req.param("key"));
+  if (!stub) {
+    return c.json({ error: "unknown_sku", tools: "/api/tools" }, 404, JSON_HEADERS);
+  }
+  if (stub.store !== "bedrock") {
+    return c.json({ error: "method_not_allowed", hint: `This tool is GET: GET /api/x402/${stub.slug || stub.sku}` }, 405, JSON_HEADERS);
+  }
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_json_body", hint: 'POST a JSON body: { "input": "the task", "sessionId": "optional" }' }, 400, JSON_HEADERS);
+  }
+  if (!body.input || typeof body.input !== "string") {
+    return c.json({ error: "missing_input", hint: '"input" (string) is required' }, 400, JSON_HEADERS);
+  }
+  const run = await invokeAgent(c.env, stub.key, { input: body.input, sessionId: body.sessionId });
+  if (!run.ok) {
+    return c.json({ error: run.error, sku: stub.sku }, run.status, JSON_HEADERS);
+  }
+  return c.json({ sku: stub.sku, completion: run.completion, sessionId: run.sessionId }, 200, JSON_HEADERS);
+});
+
 app.get("/api/x402/:key", async (c) => {
   const stub = await findTool(c.env, c.req.param("key"));
   if (!stub) {
     return c.json({ error: "unknown_sku", tools: "/api/tools" }, 404, JSON_HEADERS);
+  }
+  if (stub.store === "bedrock") {
+    return c.json({ error: "method_not_allowed", hint: `This tool executes: POST /api/x402/${stub.slug || stub.sku} with a JSON body { "input": "the task" }` }, 405, JSON_HEADERS);
   }
   const goods = await getGoods(c.env, stub);
   if (!goods) {
